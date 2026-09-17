@@ -1,5 +1,6 @@
 """Supervise a CNN training run and record terminal failures."""
 import argparse
+import os
 from pathlib import Path
 import traceback
 import faulthandler
@@ -18,11 +19,15 @@ def main():
     faulthandler.enable()
     if cfg.get("traceback_interval_seconds"):
         faulthandler.dump_traceback_later(cfg["traceback_interval_seconds"], repeat=True)
+    completed = False
     try:
         validate_training_audit(cfg)
         records = discover_patients(cfg)
         splits = make_splits(records, cfg)
-        train_expert("cnn", records, splits, cfg, resume=args.resume, init_weights=args.init_weights)
+        destination = train_expert("cnn", records, splits, cfg, resume=args.resume, init_weights=args.init_weights)
+        marker = Path(destination).parent / "RUN_COMPLETE"
+        marker.write_text(f"{destination}\n")
+        completed = True
     except BaseException as exc:
         save_json(Path(cfg["output_dir"]) / "checkpoints" / "cnn" / "status.json",
                   {"state": "failed", "error": f"{type(exc).__name__}: {exc}"})
@@ -30,6 +35,9 @@ def main():
         raise
     finally:
         faulthandler.cancel_dump_traceback_later()
+    if completed:
+        # Skip MPS teardown hang after artifacts are already on disk.
+        os._exit(0)
 
 
 if __name__ == "__main__":

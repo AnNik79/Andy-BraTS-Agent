@@ -1,5 +1,6 @@
 from pathlib import Path
 import csv
+import os
 import time
 import math
 import json
@@ -85,7 +86,11 @@ class RunEvents:
         temp = self.destination / "status.json.tmp"
         save_json(temp, row)
         temp.replace(self.destination / "status.json")
-        print(json.dumps(row, allow_nan=False), flush=True)
+        try:
+            print(json.dumps(row, allow_nan=False), flush=True)
+        except BrokenPipeError:
+            # Parent wait/pipe can close while MPS training continues; events/status are already on disk.
+            pass
 
 
 @torch.inference_mode()
@@ -309,8 +314,11 @@ def train_expert(name, records, splits, cfg, resume=None, init_weights=None):
         save_training_checkpoint(destination / "epoch_train_complete.pt", model, optimizer, scaler, cfg, splits,
                                  name, seed, cursor(True), best, device, event, scheduler)
         every = cfg.get("validation_every_epochs", 1)
-        run_validation = ((cfg.get("validate_first_epoch", True) and epoch == 1)
-                          or epoch == cfg["epochs"] or epoch % every == 0)
+        if cfg.get("validation_only_final_epoch"):
+            run_validation = epoch == cfg["epochs"]
+        else:
+            run_validation = ((cfg.get("validate_first_epoch", True) and epoch == 1)
+                              or epoch == cfg["epochs"] or epoch % every == 0)
         val_loss, dice, improved = None, None, False
         if run_validation:
             val_loss, dice = validate_expert(model, validation, cfg, device, event, epoch)
@@ -343,4 +351,9 @@ def train_expert(name, records, splits, cfg, resume=None, init_weights=None):
                 break
     event("training completed", phase="completed", state="completed", global_step=global_step,
           completed_epoch=last_completed, best_validation_dice=best)
+    for path in (destination / "history.csv", destination / "events.jsonl", destination / "status.json"):
+        if path.exists():
+            with path.open("a") as stream:
+                stream.flush()
+                os.fsync(stream.fileno())
     return destination / "best.pt"

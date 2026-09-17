@@ -1,5 +1,5 @@
-# Fresh 4-epoch CNN learning-curve run. Validation only after epoch 4.
-# Canonical splits, hardened CNN, MPS float32. Do not resume old checkpoints.
+# CNN learning-curve run. Epochs 1–15 completed; resume last.pt to continue to 20.
+# Validation only on the final requested epoch. Canonical splits, hardened CNN, MPS float32.
 dataset_root: ../data/BraTS-GLI/train
 dataset_archive: ../data/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData.zip
 output_dir: ../outputs/brats2023_gli_cnn_curve4
@@ -24,10 +24,11 @@ crop_size: [64, 64, 64]
 highres_patch_size: [32, 32, 32]
 patches_per_patient: 4
 learning_rate: 0.0003
-epochs: 4
+epochs: 20
 controller_epochs: 20
 validation_every_epochs: 5
 validate_first_epoch: false
+validation_only_final_epoch: true
 early_stopping_patience: 0
 num_workers: 0
 torch_threads: 4
