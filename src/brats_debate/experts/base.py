@@ -52,6 +52,12 @@ class Expert(nn.Module):
             for module, state in states.items():
                 module.training = state
 
+    @torch.no_grad()
+    def analyze(self, image, *, pool=True, retain_spatial=True):
+        """Observational analysis interface. Segmentation computation is unchanged."""
+        from ..analysis.extract import analyze_segmentation_expert
+        return analyze_segmentation_expert(self, image, pool=pool, retain_spatial=retain_spatial)
+
 
 def group_norm(channels):
     """GroupNorm valid at batch size 1, including 2-voxel bottlenecks.
