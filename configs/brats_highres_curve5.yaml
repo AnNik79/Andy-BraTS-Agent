@@ -1,0 +1,84 @@
+# Fresh 5-epoch High-Resolution learning-curve run. Validation only after epoch 5.
+# Canonical splits, frozen HighResolutionExpert, MPS float32. Do not initialize from other experts.
+dataset_root: ../data/BraTS-GLI/train
+dataset_archive: ../data/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData.zip
+output_dir: ../outputs/brats2023_gli_highres_curve5
+audit_report: ../outputs/brats2023_gli_audit/report.json
+require_dataset_audit: true
+patient_group_regex: '^(BraTS-GLI-\d+)-\d+$'
+manifest: null
+modalities: [t1n, t1c, t2w, t2f]
+modality_aliases:
+  t1n: [t1n]
+  t1c: [t1c]
+  t2w: [t2w]
+  t2f: [t2f]
+segmentation_aliases: [seg]
+label_mapping: {0: 0, 1: 1, 2: 2, 3: 3}
+regions: {WT: [1, 2, 3], TC: [1, 3], ET: [3], edema: [2]}
+split_fractions: {expert_train: 0.55, controller_train: 0.20, validation: 0.15, test: 0.10}
+split_file: splits/brats2023_gli_cases.json
+seed: 42
+batch_size: 1
+crop_size: [64, 64, 64]
+highres_patch_size: [32, 32, 32]
+patches_per_patient: 4
+learning_rate: 0.0003
+epochs: 5
+controller_epochs: 20
+validation_every_epochs: 5
+validate_first_epoch: false
+validation_only_final_epoch: true
+early_stopping_patience: 0
+num_workers: 0
+torch_threads: 4
+log_every_steps: 10
+save_every_steps: 100
+trace_validation_transfers: false
+traceback_interval_seconds: 600
+mixed_precision: false
+gradient_accumulation: 1
+device: mps
+model:
+  width: 24
+  feature_channels: 4
+  dropout: 0.1
+  unet_depth: 3
+  transformer_backend: hierarchical
+  transformer_dim: 64
+  transformer_heads: 4
+  transformer_layers: 2
+  transformer_window: 4
+  transformer_grid: [4, 4, 4]
+  swin_feature_size: 12
+controller_width: 8
+inference:
+  overlap: 0.5
+  mc_samples: 1
+  uncertainty_threshold: 0.55
+  highres_max_patches: 128
+  save_weights: true
+evaluation:
+  hd95: false
+  high_disagreement_threshold: 0.25
+reasoning:
+  mode: deterministic
+  provider: openai_compatible
+  model: null
+  api_key_env: BRATS_LLM_API_KEY
+  base_url_env: BRATS_LLM_BASE_URL
+  model_env: BRATS_LLM_MODEL
+  timeout_seconds: 60
+  max_disagreement_regions: 8
+cnn_probability_only_training: true
+prefetch_patients: true
+flat_candidate_sampling: true
+fast_label_mapping: true
+reuse_archive_handle: true
+numpy_validation_argmax: true
+patient_cache_dir: ../outputs/mps_performance/patient_cache
+patient_cache_max_gib: 1
+validation_performance:
+  batch_size: 1
+  accumulation_device: cpu
+  cached_geometry: true
