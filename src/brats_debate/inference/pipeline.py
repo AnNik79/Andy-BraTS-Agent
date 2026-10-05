@@ -25,13 +25,23 @@ def validate_checkpoint(checkpoint, cfg, splits, role, name=None):
         raise ValueError("Checkpoint role/expert mismatch")
 
 
+def expert_checkpoint_path(cfg, name):
+    """Frozen expert weights. Overrides stay outside protocol() so the hash is unchanged."""
+    if name == REASONING_EXPERT:
+        raise ValueError("The LLM is the reasoning expert and has no voxel checkpoint")
+    overrides = cfg.get("expert_checkpoints") or {}
+    if name in overrides:
+        return Path(overrides[name])
+    return Path(cfg["output_dir"]) / "checkpoints" / name / "best.pt"
+
+
 def load_experts(cfg, splits, names=None):
     names = SEGMENTATION_EXPERTS if names is None else tuple(names)
     if REASONING_EXPERT in names:
         raise ValueError("The LLM is the reasoning expert and has no voxel checkpoint; use LLMReasoningExpert")
     models, hashes = {}, {}
     for name in names:
-        path = Path(cfg["output_dir"]) / "checkpoints" / name / "best.pt"
+        path = expert_checkpoint_path(cfg, name)
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         validate_checkpoint(checkpoint, cfg, splits, "expert", name)
         model = build_expert(name, cfg)

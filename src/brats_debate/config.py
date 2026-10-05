@@ -51,6 +51,11 @@ def load_config(path):
     for key in ("dataset_root", "output_dir", "manifest", "split_file", "dataset_archive", "audit_report", "patient_cache_dir"):
         if cfg.get(key):
             cfg[key] = str((path.parent / cfg[key]).resolve())
+    if cfg.get("expert_checkpoints"):
+        cfg["expert_checkpoints"] = {
+            name: str((path.parent / checkpoint).resolve())
+            for name, checkpoint in cfg["expert_checkpoints"].items()
+        }
     cfg["label_mapping"] = {int(k): int(v) for k, v in cfg["label_mapping"].items()}
     mapping = cfg["label_mapping"]
     if mapping.get(0) != 0 or sorted(mapping.values()) != list(range(len(mapping))):

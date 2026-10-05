@@ -5,8 +5,22 @@ from .config import load_config, save_json, EXPERTS, device_for, seed_everything
 from .data.brats_dataset import discover_patients, load_patient, make_splits
 
 
+COMMAND_HELP = {
+    "generate_controller_data": "Cache controller_train patches only. Does not evaluate the test split.",
+    "train_controller": (
+        "Train the controller on the controller_train patch cache and save every epoch checkpoint. "
+        "Does not run full-volume validation or evaluate the test split."
+    ),
+    "validate_controller": (
+        "Score every saved controller epoch on the validation split in one frozen-expert pass, "
+        "then promote best.pt. Does not evaluate the test split."
+    ),
+}
+
+
 def main(command=None):
-    parser = argparse.ArgumentParser(description="BraTS independent experts research prototype")
+    parser = argparse.ArgumentParser(
+        description=COMMAND_HELP.get(command, "BraTS independent experts research prototype"))
     parser.add_argument("--config", required=True)
     if command == "train_experts":
         parser.add_argument("--expert", choices=["all", *EXPERTS], default="all")
@@ -62,6 +76,9 @@ def main(command=None):
     elif command == "train_controller":
         from .training.train_controller import train_controller
         train_controller(records, splits, cfg)
+    elif command == "validate_controller":
+        from .training.train_controller import validate_saved_controllers
+        validate_saved_controllers(records, splits, cfg)
     elif command == "evaluate":
         from .evaluation.evaluate import evaluate
         evaluate(records, splits, cfg, args.split, args.initial)
