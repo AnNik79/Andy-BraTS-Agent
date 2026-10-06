@@ -8,9 +8,9 @@ from brats_debate.controller.gating_network import GatingNetwork
 from brats_debate.debate.features import feature_channels
 from brats_debate.experts.base import pack_output
 from brats_debate.training.train_controller import (
-    _save_controller_epoch, aggregate_validation_scores, controller_run_dir, epoch_checkpoint_path,
-    generate_controller_data, score_controller_metrics, score_controller_volume, sorted_epoch_checkpoints,
-    train_controller, validate_controller, validate_saved_controllers,
+    _refuse_existing_run, _save_controller_epoch, aggregate_validation_scores, controller_run_dir,
+    epoch_checkpoint_path, generate_controller_data, score_controller_metrics, score_controller_volume,
+    sorted_epoch_checkpoints, train_controller, validate_controller, validate_saved_controllers,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,6 +107,18 @@ def install_experts(monkeypatch, loaded, predicted):
     monkeypatch.setattr("brats_debate.training.train_controller.load_experts",
                         lambda cfg, splits: ({"kept": object()}, dict(HASHES)))
     monkeypatch.setattr("brats_debate.inference.pipeline.predict_experts", predict)
+
+
+def test_appledouble_sidecars_do_not_block_resume(tmp_path):
+    cfg = controller_cfg(tmp_path)
+    directory = controller_run_dir(cfg)
+    directory.mkdir(parents=True)
+    (directory / "epoch_001.pt").write_bytes(b"real")
+    (directory / "._epoch_001.pt").write_bytes(b"sidecar")
+    _refuse_existing_run(cfg)
+    (directory / "notes.pt").write_bytes(b"other")
+    with pytest.raises(FileExistsError, match="unexpected checkpoints"):
+        _refuse_existing_run(cfg)
 
 
 def test_epoch_files_sort_numerically(tmp_path):

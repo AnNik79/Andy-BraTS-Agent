@@ -211,7 +211,8 @@ def _refuse_existing_run(cfg):
             "Refusing to overwrite a selected or previous run. Use a new output_dir. "
             "No files were overwritten."
         )
-    unexpected = [path.name for path in directory.glob("*.pt") if parse_epoch_filename(path) is None] if directory.exists() else []
+    unexpected = [path.name for path in directory.glob("*.pt")
+                  if not path.name.startswith("._") and parse_epoch_filename(path) is None] if directory.exists() else []
     if unexpected:
         raise FileExistsError(
             f"Controller directory contains unexpected checkpoints {unexpected}. "
