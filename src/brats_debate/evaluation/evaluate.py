@@ -1,10 +1,14 @@
 from pathlib import Path
 from itertools import combinations
+import gc
 import json
+import os
+import re
+import tempfile
 import numpy as np
 import pandas as pd
 import torch
-from ..config import EXPERTS, device_for, save_json, seed_everything
+from ..config import EXPERTS, device_for, fingerprint, protocol, save_json, seed_everything
 from ..data.brats_dataset import load_patient
 from ..inference.pipeline import load_experts, load_controller, run_patient, predict_experts, save_nifti
 from ..inference.patches import sliding_predict
@@ -14,6 +18,71 @@ from ..reasoning.reasoning_engine import as_volume
 from ..visualization.visualize import visualize
 from .metrics import segmentation_metrics
 from .disagreement_analysis import case_error_analysis, cohort_correlation
+
+CASE_FORMAT = "final_evaluation_case_v1"
+_PATIENT_ID = re.compile(r"BraTS-GLI-\d{5}-\d{3}")
+
+
+def evaluation_provenance(cfg, split, expert_hashes, controller_hash):
+    """Frozen settings a resumed case must still match. Does not include predictions."""
+    return {
+        "split": split,
+        "expert_hashes": None if expert_hashes is None else dict(expert_hashes),
+        "controller_hash": controller_hash,
+        "protocol_hash": fingerprint(protocol(cfg)),
+        "overlap": cfg["inference"]["overlap"],
+        "mc_samples": cfg["inference"]["mc_samples"],
+        "uncertainty_threshold": cfg["inference"]["uncertainty_threshold"],
+        "highres_max_patches": cfg["inference"]["highres_max_patches"],
+        "hd95": bool(cfg["evaluation"]["hd95"]),
+        "seed": cfg["seed"],
+    }
+
+
+def _case_path(destination, patient_id):
+    if _PATIENT_ID.fullmatch(patient_id) is None:
+        raise ValueError(f"Unexpected patient id: {patient_id}")
+    return destination / "cases" / f"{patient_id}.json"
+
+
+def _case_is_complete(path, patient_id, provenance):
+    if not path.is_file():
+        return False
+    try:
+        saved = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        saved.get("format") == CASE_FORMAT
+        and saved.get("complete") is True
+        and saved.get("patient_id") == patient_id
+        and saved.get("provenance") == provenance
+        and saved.get("rows")
+        and saved.get("analyses") is not None
+        and saved.get("diversity_rows") is not None
+    )
+
+
+def _atomic_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.stem}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            json.dump(payload, handle, indent=2, allow_nan=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        os.unlink(temporary)
+        raise
+
+
+def _release(device, *objects):
+    del objects
+    gc.collect()
+    if device.type == "mps" and hasattr(torch, "mps"):
+        torch.mps.empty_cache()
 
 
 def evaluate(records, splits, cfg, split="validation", initial=False):
@@ -36,41 +105,55 @@ def evaluate(records, splits, cfg, split="validation", initial=False):
         if validation["expert_hashes"] != hashes or validation["controller_hash"] != controller_hash:
             raise ValueError("Validation report is stale; reevaluate validation with the final checkpoints")
         selected_best = validation["best_individual_expert_selected_on_validation"]
-    rows, analyses, diversity_rows = [], [], []
-    for record in records:
-        if record["patient_id"] not in splits[split]:
+    provenance = evaluation_provenance(cfg, split, hashes, controller_hash)
+    selected = [record for record in records if record["patient_id"] in set(splits[split])]
+    payloads = {}
+    for record in selected:
+        path = _case_path(destination, record["patient_id"])
+        if _case_is_complete(path, record["patient_id"], provenance):
+            payloads[record["patient_id"]] = json.loads(path.read_text())
+    print(
+        f"evaluation resume: {len(payloads)} complete cases kept, "
+        f"{len(selected) - len(payloads)} incomplete cases will be rerun",
+        flush=True,
+    )
+    for record in selected:
+        if record["patient_id"] in payloads:
+            print(f"Resumed {record['patient_id']}", flush=True)
             continue
         patient = load_patient(record, cfg)
-        if initial:
-            outputs = predict_experts(patient, models, cfg, device)
-            debate = analyze_disagreement(outputs)
-            predictions = {name: as_volume(out["segmentation"]) for name, out in outputs.items()}
-            predictions["average"] = as_volume(debate["average_probabilities"].argmax(1))
-            predictions["vote"] = as_volume(debate["majority_segmentation"])
-            final = debate["average_probabilities"]
-            case_dir = destination / patient["patient_id"]
-            case_dir.mkdir(exist_ok=True)
-            save_nifti(case_dir / "disagreement.nii.gz", as_volume(debate["map"]), patient)
-            for name, pred in predictions.items():
-                save_nifti(case_dir / f"{name}_seg.nii.gz", pred, patient, True, cfg)
-            visualize(patient, predictions, as_volume(debate["map"]), case_dir / "visualization.png",
-                      next((cfg["modalities"].index(m) for m in ("flair", "t2f") if m in cfg["modalities"]), 0))
-        else:
-            predictions, outputs, debate, final, summary = run_patient(patient, models, controller, cfg, device)
-            # Fair standalone baseline: full coverage with no other experts proposing regions.
-            model = models["highres"].to(device)
-            full_highres = sliding_predict(model, torch.from_numpy(patient["image"])[None], cfg["highres_patch_size"],
-                                           device, cfg["inference"]["overlap"], cfg["inference"]["mc_samples"])
-            model.cpu()
-            predictions["highres"] = as_volume(full_highres["segmentation"])
-            save_nifti(Path(cfg["output_dir"]) / "predictions" / patient["patient_id"] / "highres_full_seg.nii.gz",
-                       predictions["highres"], patient, True, cfg)
+        with torch.inference_mode():
+            if initial:
+                outputs = predict_experts(patient, models, cfg, device)
+                debate = analyze_disagreement(outputs)
+                predictions = {name: as_volume(out["segmentation"]) for name, out in outputs.items()}
+                predictions["average"] = as_volume(debate["average_probabilities"].argmax(1))
+                predictions["vote"] = as_volume(debate["majority_segmentation"])
+                final = debate["average_probabilities"]
+                case_dir = destination / patient["patient_id"]
+                case_dir.mkdir(exist_ok=True)
+                save_nifti(case_dir / "disagreement.nii.gz", as_volume(debate["map"]), patient)
+                for name, pred in predictions.items():
+                    save_nifti(case_dir / f"{name}_seg.nii.gz", pred, patient, True, cfg)
+                visualize(patient, predictions, as_volume(debate["map"]), case_dir / "visualization.png",
+                          next((cfg["modalities"].index(m) for m in ("flair", "t2f") if m in cfg["modalities"]), 0))
+            else:
+                predictions, outputs, debate, final, summary = run_patient(patient, models, controller, cfg, device)
+                # Fair standalone baseline: full coverage with no other experts proposing regions.
+                model = models["highres"].to(device)
+                full_highres = sliding_predict(model, torch.from_numpy(patient["image"])[None], cfg["highres_patch_size"],
+                                               device, cfg["inference"]["overlap"], cfg["inference"]["mc_samples"])
+                model.cpu()
+                predictions["highres"] = as_volume(full_highres["segmentation"])
+                save_nifti(Path(cfg["output_dir"]) / "predictions" / patient["patient_id"] / "highres_full_seg.nii.gz",
+                           predictions["highres"], patient, True, cfg)
         brain_mask = (patient["image"] != 0).any(0) | (patient["label"] > 0)
+        case_rows, case_analyses, case_diversity = [], [], []
         for a, b in combinations(models, 2):
             ea = (predictions[a] != patient["label"]) & brain_mask
             eb = (predictions[b] != patient["label"]) & brain_mask
             union = ea | eb
-            diversity_rows.append({"patient_id": patient["patient_id"], "expert_a": a, "expert_b": b,
+            case_diversity.append({"patient_id": patient["patient_id"], "expert_a": a, "expert_b": b,
                                    "error_overlap_jaccard": float((ea & eb).sum() / union.sum()) if union.any() else None,
                                    "only_one_expert_wrong_fraction": float((ea ^ eb).sum() / max(1, brain_mask.sum())),
                                    "both_wrong_fraction": float((ea & eb).sum() / max(1, brain_mask.sum()))})
@@ -81,7 +164,7 @@ def evaluate(records, splits, cfg, split="validation", initial=False):
                    "mean_dice": metrics.pop("mean_dice"), "brats_mean_dice": metrics.pop("brats_mean_dice")}
             for region, values in metrics.items():
                 row.update({f"{region}_{key}": value for key, value in values.items()})
-            rows.append(row)
+            case_rows.append(row)
             p = outputs[method]["probabilities"] if method in outputs and method != "highres" else final
             if method == "highres":
                 p = full_highres["probabilities"]
@@ -90,8 +173,20 @@ def evaluate(records, splits, cfg, split="validation", initial=False):
             analysis = case_error_analysis(as_volume(debate["map"]), prediction, patient["label"],
                 as_volume(uncertainty(p)["entropy"]), cfg["evaluation"]["high_disagreement_threshold"],
                 brain_mask=(patient["image"] != 0).any(0) | (patient["label"] > 0))
-            analyses.append({"patient_id": patient["patient_id"], "method": method, **analysis})
+            case_analyses.append({"patient_id": patient["patient_id"], "method": method, **analysis})
+        payload = {"format": CASE_FORMAT, "complete": True, "patient_id": patient["patient_id"],
+                   "provenance": provenance, "rows": case_rows, "analyses": case_analyses,
+                   "diversity_rows": case_diversity}
+        _atomic_json(_case_path(destination, patient["patient_id"]), payload)
+        payloads[patient["patient_id"]] = payload
         print(f"Evaluated {patient['patient_id']}", flush=True)
+        _release(device)
+    rows, analyses, diversity_rows = [], [], []
+    for record in selected:
+        saved = payloads[record["patient_id"]]
+        rows.extend(saved["rows"])
+        analyses.extend(saved["analyses"])
+        diversity_rows.extend(saved["diversity_rows"])
     frame = pd.DataFrame(rows)
     frame.to_csv(destination / "metrics.csv", index=False)
     pd.DataFrame(analyses).to_csv(destination / "disagreement_errors.csv", index=False)

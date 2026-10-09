@@ -64,7 +64,8 @@ inference:
   highres_max_patches: 128
   save_weights: true
 evaluation:
-  hd95: false
+  # Final test metric only. Not an inference setting and not part of the protocol hash.
+  hd95: true
   high_disagreement_threshold: 0.25
 reasoning:
   mode: deterministic

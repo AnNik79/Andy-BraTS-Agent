@@ -67,6 +67,108 @@ def test_provenance_rejects_leakage(cfg):
         validate_checkpoint(checkpoint, cfg, splits, "expert", "cnn")
 
 
+def test_final_evaluation_resumes_without_double_counting(tmp_path, monkeypatch):
+    import json
+    import torch
+    from brats_debate.evaluation.evaluate import (
+        CASE_FORMAT, _case_is_complete, _case_path, evaluate,
+    )
+
+    patient_id = "BraTS-GLI-00001-001"
+    other_id = "BraTS-GLI-00002-001"
+    shape = (4, 4, 4)
+    image = np.zeros((4, *shape), np.float32)
+    image[0, 0, 0, 0] = 1
+    label = np.zeros(shape, np.int16)
+    import nibabel as nib
+    patient = {"patient_id": patient_id, "image": image, "label": label,
+               "spacing": (1.0, 1.0, 1.0), "affine": np.eye(4), "header": nib.Nifti1Header()}
+    probabilities = torch.full((1, 4, *shape), 0.25)
+    segmentation = torch.zeros((1, *shape), dtype=torch.int64)
+    calls = {"load": 0, "run": 0}
+
+    class _Model:
+        def to(self, device):
+            return self
+
+        def cpu(self):
+            return self
+
+    models = {name: _Model() for name in ("cnn", "transformer", "boundary", "highres")}
+    hashes = {name: f"hash-{name}" for name in models}
+
+    def load_experts(cfg, splits, names=None):
+        return models, hashes
+
+    def load_controller(cfg, splits, expert_hashes):
+        assert expert_hashes == hashes
+        return _Model(), "controller-hash"
+
+    def load_one(record, cfg):
+        calls["load"] += 1
+        assert record["patient_id"] == patient_id
+        return patient
+
+    def run_one(patient, models, controller, cfg, device, reasoning_engine=None):
+        calls["run"] += 1
+        predictions = {name: label.copy() for name in
+                       ("cnn", "transformer", "boundary", "highres", "average", "vote", "final")}
+        outputs = {name: {"probabilities": probabilities} for name in ("cnn", "transformer", "boundary")}
+        debate = {"map": torch.zeros((1, 1, *shape)), "average_probabilities": probabilities}
+        return predictions, outputs, debate, probabilities, {}
+
+    def sliding(model, image, patch, device, overlap, mc_samples, proposal=None, max_patches=None):
+        return {"probabilities": probabilities, "segmentation": segmentation}
+
+    monkeypatch.setattr("brats_debate.evaluation.evaluate.load_experts", load_experts)
+    monkeypatch.setattr("brats_debate.evaluation.evaluate.load_controller", load_controller)
+    monkeypatch.setattr("brats_debate.evaluation.evaluate.load_patient", load_one)
+    monkeypatch.setattr("brats_debate.evaluation.evaluate.run_patient", run_one)
+    monkeypatch.setattr("brats_debate.evaluation.evaluate.sliding_predict", sliding)
+    monkeypatch.setattr("brats_debate.evaluation.evaluate.save_nifti", lambda *args, **kwargs: None)
+    cfg = {
+        "seed": 1, "device": "cpu", "output_dir": str(tmp_path),
+        "modalities": ["t1n"], "label_mapping": {0: 0, 1: 1, 2: 2, 3: 4},
+        "regions": {"WT": [1, 2, 3], "TC": [1, 3], "ET": [3], "edema": [2]},
+        "model": {"feature_channels": 4}, "crop_size": [4, 4, 4], "highres_patch_size": [2, 2, 2],
+        "inference": {"overlap": 0.5, "mc_samples": 1, "uncertainty_threshold": 0.55,
+                      "highres_max_patches": 128, "save_weights": False},
+        "evaluation": {"hd95": True, "high_disagreement_threshold": 0.25},
+    }
+    splits = {"expert_train": [], "controller_train": [], "validation": [other_id], "test": [patient_id]}
+    records = [{"patient_id": patient_id}, {"patient_id": other_id}]
+    report_path = tmp_path / "evaluation" / "validation" / "report.json"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(json.dumps({
+        "expert_hashes": hashes,
+        "controller_hash": "controller-hash",
+        "best_individual_expert_selected_on_validation": "boundary",
+    }))
+    first = evaluate(records, splits, cfg, split="test")
+    assert calls == {"load": 1, "run": 1}
+    assert first["patients"] == 1
+    assert first["best_individual_expert_selected_on_validation"] == "boundary"
+    case_path = tmp_path / "evaluation" / "test" / "cases" / f"{patient_id}.json"
+    saved = json.loads(case_path.read_text())
+    assert saved["format"] == CASE_FORMAT and saved["complete"] is True
+    assert len(saved["rows"]) == 7
+    second = evaluate(records, splits, cfg, split="test")
+    assert calls == {"load": 1, "run": 1}
+    assert second["patients"] == 1
+    metrics = (tmp_path / "evaluation" / "test" / "metrics.csv").read_text().strip().splitlines()
+    assert len(metrics) == 8
+    saved["provenance"]["controller_hash"] = "stale"
+    case_path.write_text(json.dumps(saved))
+    evaluate(records, splits, cfg, split="test")
+    assert calls == {"load": 2, "run": 2}
+    incomplete = json.loads(case_path.read_text())
+    incomplete["complete"] = False
+    case_path.write_text(json.dumps(incomplete))
+    assert _case_is_complete(case_path, patient_id, incomplete["provenance"]) is False
+    with pytest.raises(ValueError):
+        _case_path(tmp_path, "not-a-case")
+
+
 def test_original_space_export(cfg, tmp_path):
     import nibabel as nib
     patient = load_patient(discover_patients(cfg)[0], cfg)

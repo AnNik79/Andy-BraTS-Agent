@@ -1,0 +1,120 @@
+{
+  "name": "CancerAgents Beta 1",
+  "status": "frozen_before_final_test",
+  "git_commit_before_this_manifest": "32f54d92921dd89e27105de4a27ea1c97099751a",
+  "branch": "main",
+  "selected_controller_epoch": 19,
+  "selection_rule": "highest mean brats_mean_dice; earliest epoch breaks ties",
+  "best_individual_expert_on_validation": "boundary",
+  "checkpoints": {
+    "cnn": {
+      "path": "outputs/brats2023_gli_cnn_curve4/checkpoints/cnn/best.pt",
+      "sha256": "e8fbde5084353dc5aa499626d208fad7c7c4595e23376daa7d98a4890259697c"
+    },
+    "transformer": {
+      "path": "outputs/brats2023_gli_transformer_curve3/checkpoints/transformer/best.pt",
+      "sha256": "dd77255376fb0831e7b91795dff3dbf1bba647b3e305df9ef5dfa21d6d55b64b"
+    },
+    "boundary": {
+      "path": "outputs/brats2023_gli_boundary_curve2/checkpoints/boundary/best.pt",
+      "sha256": "dd360d8d6430acd4eff116b181ed3b83b2144fffd16c0bf8c0baaa913f00b79c"
+    },
+    "highres": {
+      "path": "outputs/brats2023_gli_highres_curve5/checkpoints/highres/best.pt",
+      "sha256": "15bd9b270ff3ca160e7a4f07a93809e1e5ad9c7e25b352966df5940d639b83c0"
+    },
+    "controller": {
+      "path": "outputs/brats2023_gli_controller/checkpoints/controller/best.pt",
+      "sha256": "86b604082a934a1d4f4a68467a88d16d268ae7653c552dcfc6c3087ba1d79fe2",
+      "identical_to": "epoch_019.pt"
+    }
+  },
+  "protocol_hash": "721b8dcb3bb3a6f84ad82c7ee78a443bef8754743aebc88368e0123159477d98",
+  "split_hash": "705cf73c10ab6d047b095c461fe8c71329b3e0a3ee01f925ced205747102cfe2",
+  "split_file_sha256": "fe092054c050e80cfd7f5163fb79de6f33f1d768acf59364f1ad7b3c57163be7",
+  "config_sha256": "ba2ebe68e1f9c27ad7d27f804483ccca69621838a4acf0df4b2a84b7ba0ae14a",
+  "splits": {
+    "expert_train": 682,
+    "controller_train": 248,
+    "validation": 191,
+    "test": 130
+  },
+  "validation": {
+    "cases": 191,
+    "WT_dice": 0.9016060223282829,
+    "TC_dice": 0.8738596474333231,
+    "ET_dice": 0.8303879823719927,
+    "brats_mean_dice": 0.8686178840445329,
+    "hd95_computed": false
+  },
+  "expert_validation": {
+    "cnn": {
+      "epoch": 15,
+      "cases": 191,
+      "brats_mean_dice": 0.8621752521506791,
+      "WT_dice": 0.8962176075726893,
+      "TC_dice": 0.8655271472232139,
+      "ET_dice": 0.8247810016561341
+    },
+    "transformer": {
+      "epoch": 6,
+      "cases": 191,
+      "brats_mean_dice": 0.8576247353624641,
+      "WT_dice": 0.8886665003596469,
+      "TC_dice": 0.8623116169348014,
+      "ET_dice": 0.8218960887929426
+    },
+    "boundary": {
+      "epoch": 16,
+      "cases": 191,
+      "brats_mean_dice": 0.8626974428740678,
+      "WT_dice": 0.8997166586897322,
+      "TC_dice": 0.866927623318666,
+      "ET_dice": 0.8214480466138043
+    },
+    "highres": {
+      "epoch": 20,
+      "cases": 191,
+      "brats_mean_dice": 0.813947978686804,
+      "WT_dice": 0.8281897778195143,
+      "TC_dice": 0.8312339088163486,
+      "ET_dice": 0.782420249424547
+    }
+  },
+  "inference": {
+    "overlap": 0.5,
+    "mc_samples": 1,
+    "uncertainty_threshold": 0.55,
+    "highres_max_patches": 128,
+    "save_weights": true,
+    "feature_channels": 65,
+    "controller_width": 8,
+    "crop_size": [
+      64,
+      64,
+      64
+    ],
+    "highres_patch_size": [
+      32,
+      32,
+      32
+    ],
+    "device": "mps",
+    "mixed_precision": false,
+    "seed": 42
+  },
+  "evaluation": {
+    "hd95": true,
+    "note": "HD95 is an evaluation metric. It is outside protocol() and does not change checkpoints or segmentations."
+  },
+  "runtime": {
+    "python": "3.12.7",
+    "torch": "2.10.0",
+    "numpy": "1.26.4",
+    "nibabel": "5.4.2",
+    "pandas": "2.2.2",
+    "scipy": "1.14.1",
+    "scikit_learn": "1.7.2",
+    "mps": true
+  }
+}
