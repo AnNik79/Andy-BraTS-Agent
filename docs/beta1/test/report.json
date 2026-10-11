@@ -1,0 +1,115 @@
+{
+  "split": "test",
+  "initial_comparison": false,
+  "expert_hashes": {
+    "cnn": "e8fbde5084353dc5aa499626d208fad7c7c4595e23376daa7d98a4890259697c",
+    "transformer": "dd77255376fb0831e7b91795dff3dbf1bba647b3e305df9ef5dfa21d6d55b64b",
+    "boundary": "dd360d8d6430acd4eff116b181ed3b83b2144fffd16c0bf8c0baaa913f00b79c",
+    "highres": "15bd9b270ff3ca160e7a4f07a93809e1e5ad9c7e25b352966df5940d639b83c0"
+  },
+  "controller_hash": "86b604082a934a1d4f4a68467a88d16d268ae7653c552dcfc6c3087ba1d79fe2",
+  "patients": 130,
+  "mean_dice": {
+    "average": 0.8564882726907282,
+    "boundary": 0.850260166842992,
+    "cnn": 0.8530822738640015,
+    "final": 0.8588754271052138,
+    "highres": 0.7871967538596718,
+    "transformer": 0.8470488160096604,
+    "vote": 0.8573994323065972
+  },
+  "brats_mean_dice": {
+    "average": 0.872199959172938,
+    "boundary": 0.8634439675434475,
+    "cnn": 0.8684446209600831,
+    "final": 0.8734352777446935,
+    "highres": 0.81344098171662,
+    "transformer": 0.8660222073649182,
+    "vote": 0.8731181744723431
+  },
+  "best_individual_expert_selected_on_validation": "boundary",
+  "mean_dice_definition": "Unweighted mean of configured regions; background excluded",
+  "brats_mean_dice_definition": "Unweighted mean of WT, TC, and ET Dice only",
+  "standalone_highres": "Full-volume native-resolution inference; proposal-limited highres used for fusion",
+  "abstentions": "Average, vote, and controller exclude uncovered specialist voxels; vote ties select lowest class index",
+  "disagreement_error_correlation": {
+    "average": {
+      "spearman_r": 0.701533545453304,
+      "p_value": 1.4627245718950982e-20,
+      "patients": 130
+    },
+    "boundary": {
+      "spearman_r": 0.698359939368283,
+      "p_value": 2.565463666476357e-20,
+      "patients": 130
+    },
+    "cnn": {
+      "spearman_r": 0.6784934930150623,
+      "p_value": 7.363963685945486e-19,
+      "patients": 130
+    },
+    "final": {
+      "spearman_r": 0.6741127149080282,
+      "p_value": 1.4906161399973821e-18,
+      "patients": 130
+    },
+    "highres": {
+      "spearman_r": 0.8968386841278728,
+      "p_value": 3.5726364383661187e-47,
+      "patients": 130
+    },
+    "transformer": {
+      "spearman_r": 0.6580535033934644,
+      "p_value": 1.7888902234057773e-17,
+      "patients": 130
+    },
+    "vote": {
+      "spearman_r": 0.673555558590176,
+      "p_value": 1.629073048571922e-18,
+      "patients": 130
+    }
+  },
+  "research_only": true,
+  "controller_improvement_dice": {
+    "best_individual": 0.009991310201245995,
+    "average": 0.001235318571755517,
+    "vote": 0.00031710327235046076
+  },
+  "hd95_mm": {
+    "average": {
+      "WT": 18.685776272135524,
+      "TC": 15.566827455734929,
+      "ET": 13.097325717376526
+    },
+    "boundary": {
+      "WT": 18.392947225388745,
+      "TC": 17.22320999217094,
+      "ET": 13.833145662608654
+    },
+    "cnn": {
+      "WT": 18.949601843530385,
+      "TC": 13.520018468263817,
+      "ET": 11.923301996984561
+    },
+    "final": {
+      "WT": 17.278632100748155,
+      "TC": 14.420836827499992,
+      "ET": 12.527113481717384
+    },
+    "highres": {
+      "WT": 47.914160132551274,
+      "TC": 34.394093391920606,
+      "ET": 26.407482427726176
+    },
+    "transformer": {
+      "WT": 17.239262269535853,
+      "TC": 13.148460632134107,
+      "ET": 10.177170373638404
+    },
+    "vote": {
+      "WT": 17.22053812193384,
+      "TC": 12.452366336033162,
+      "ET": 10.918515354232524
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "CancerAgents Beta 1",
-  "status": "frozen_before_final_test",
+  "status": "beta1_complete",
   "git_commit_before_this_manifest": "32f54d92921dd89e27105de4a27ea1c97099751a",
   "branch": "main",
   "selected_controller_epoch": 19,
@@ -116,5 +116,68 @@
     "scipy": "1.14.1",
     "scikit_learn": "1.7.2",
     "mps": true
+  },
+  "final_test": {
+    "cases": 130,
+    "split": "test",
+    "selected_controller_epoch": 19,
+    "checkpoint_sha256": "86b604082a934a1d4f4a68467a88d16d268ae7653c552dcfc6c3087ba1d79fe2",
+    "expert_hashes_match_manifest": true,
+    "controller_hash_matches_manifest": true,
+    "brats_mean_dice": {
+      "average": 0.872199959172938,
+      "boundary": 0.8634439675434475,
+      "cnn": 0.8684446209600831,
+      "final": 0.8734352777446935,
+      "highres": 0.81344098171662,
+      "transformer": 0.8660222073649182,
+      "vote": 0.8731181744723431
+    },
+    "hd95_mm": {
+      "average": {
+        "WT": 18.685776272135524,
+        "TC": 15.566827455734929,
+        "ET": 13.097325717376526
+      },
+      "boundary": {
+        "WT": 18.392947225388745,
+        "TC": 17.22320999217094,
+        "ET": 13.833145662608654
+      },
+      "cnn": {
+        "WT": 18.949601843530385,
+        "TC": 13.520018468263817,
+        "ET": 11.923301996984561
+      },
+      "final": {
+        "WT": 17.278632100748155,
+        "TC": 14.420836827499992,
+        "ET": 12.527113481717384
+      },
+      "highres": {
+        "WT": 47.914160132551274,
+        "TC": 34.394093391920606,
+        "ET": 26.407482427726176
+      },
+      "transformer": {
+        "WT": 17.239262269535853,
+        "TC": 13.148460632134107,
+        "ET": 10.177170373638404
+      },
+      "vote": {
+        "WT": 17.22053812193384,
+        "TC": 12.452366336033162,
+        "ET": 10.918515354232524
+      }
+    },
+    "best_individual_expert_selected_on_validation": "boundary",
+    "best_individual_expert_on_test_by_brats_mean_dice": "cnn",
+    "controller_minus_best_test_expert": 0.004990656784610414,
+    "controller_improvement_versus_validation_selected_expert": {
+      "best_individual": 0.009991310201245995,
+      "average": 0.001235318571755517,
+      "vote": 0.00031710327235046076
+    },
+    "summary": "docs/beta1/test/report.json"
   }
 }

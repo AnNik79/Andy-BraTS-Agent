@@ -1,8 +1,27 @@
-# BraTS expert disagreement research beta
+# CancerAgents Beta 1
+
+Beta 1 is the frozen BraTS 2023 glioma segmentation study: four experts, one learned voxel-wise controller, and one untouched 130-case test. The full record, checkpoint hashes, and test summary are in [docs/beta1/README.md](docs/beta1/README.md).
+
+The controller selected on validation is epoch 19. On the 130-case test its mean Dice, the unweighted mean of whole tumor, tumor core, and enhancing tumor, is **0.87344**. The best single expert on that same test is the CNN at **0.86844**. The controller is higher on all three regions. These scores are not an accuracy percentage and they are not evidence of clinical effectiveness.
+
+| Model | WT Dice | TC Dice | ET Dice | Mean Dice |
+|---|---:|---:|---:|---:|
+| CNN | 0.88975 | 0.87074 | 0.84484 | 0.86844 |
+| Transformer | 0.88666 | 0.86631 | 0.84510 | 0.86602 |
+| Boundary | 0.89014 | 0.86263 | 0.83757 | 0.86344 |
+| HighRes | 0.80420 | 0.83077 | 0.80536 | 0.81344 |
+| Controller, epoch 19 | 0.89479 | 0.87679 | 0.84872 | 0.87344 |
+
+Reproduce the frozen test with the committed config and the five checkpoints named in the manifest. Do not refit, change thresholds, or pick another epoch from these test scores.
+
+```bash
+python scripts/evaluate.py --config configs/brats_controller.yaml --split test
+python scripts/run_inference.py --config configs/brats_controller.yaml --patient /path/to/one/patient
+```
 
 The system has **five experts**: four independently trained 3D segmentation experts (CNN, Transformer, Boundary / Sum Medical, High Resolution) plus an LLM reasoning expert. A disagreement layer compares the four imaging experts. A learned controller gates those four voxel models. The LLM reasons over structured debate evidence and cannot change the segmentation mask. Average and majority vote are experimental baselines only.
 
-This is a research prototype, not a clinically validated system or a cancer diagnosis tool. Expert disagreement is a model statistic, not established medical uncertainty. Real BraTS 2023 GLI data is now configured; see [the real-data workflow](docs/real_data_workflow.md) for the complete training archive, exhaustive audit, patient grouping, and CNN-only run. Synthetic checks verify software behavior only; they provide no evidence of segmentation quality or controller improvement.
+This is a research prototype, not a clinically validated system or a cancer diagnosis tool. Expert disagreement is a model statistic, not established medical uncertainty. Real BraTS 2023 GLI data is configured in [the real-data workflow](docs/real_data_workflow.md). Synthetic checks verify software behavior only; they provide no evidence of segmentation quality or controller improvement.
 
 ## Install
 
@@ -133,10 +152,10 @@ The LLM is the fifth expert and sits beside the controller. It receives a struct
 Set `reasoning.mode: llm` and provide `BRATS_LLM_API_KEY` (optional `BRATS_LLM_BASE_URL`, `BRATS_LLM_MODEL` or `reasoning.model`) for a real OpenAI-compatible chat completion. If real-LLM mode is requested without a key, the run fails clearly. `reasoning.mode: deterministic` is an explicit test fallback and is labeled as **not** an LLM. Unusual/difficult regions are flagged from disagreement and uncertainty; this is not an anatomical abnormality detector.
 
 For the measured local M2 Pro CNN optimizations, benchmark evidence, and numerical
-resume checks, see [the MPS performance report](docs/mps_performance.md). Those
-engineering measurements remain; the previous real-BraTS CNN checkpoints were
-deleted for a clean GPU retraining campaign. Use a fresh `output_dir`. Performance
-dependencies are available with `pip install -e '.[performance]'`.
+resume checks, see [the MPS performance report](docs/mps_performance.md). Beta 1
+uses the frozen checkpoints listed in [the Beta 1 manifest](docs/beta1/manifest.json),
+not an earlier deleted campaign. Performance dependencies are available with
+`pip install -e '.[performance]'`.
 
 ## Synthetic verification
 

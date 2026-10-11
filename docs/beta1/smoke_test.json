@@ -1,0 +1,17 @@
+{
+  "patient_id": "BraTS-GLI-99999-999",
+  "input": "synthetic 64x64x48 volume, not a BraTS case",
+  "output_shape": [
+    64,
+    64,
+    48
+  ],
+  "labels": [
+    0,
+    2,
+    3
+  ],
+  "files_present": true,
+  "checkpoint_hashes_unchanged": true,
+  "weights_or_thresholds_changed": false
+}
