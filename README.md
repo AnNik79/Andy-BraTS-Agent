@@ -2,6 +2,17 @@
 
 Beta 1 is the frozen BraTS 2023 glioma segmentation study: four experts, one learned voxel-wise controller, and one untouched 130-case test. The full record, checkpoint hashes, and test summary are in [docs/beta1/README.md](docs/beta1/README.md).
 
+## Beta 2 research direction
+
+Beta 2 is an additive, uncertainty-aware research program on branch
+`research/uncertainty-active-perception`. It studies whether frozen-expert
+disagreement can predict segmentation errors, support calibrated reliability
+and probabilistic volume estimates, explain controller trust, and rank feasible
+additional evidence. It does not change the frozen Beta 1 inference path by
+default, and no new Beta 2 method has yet been experimentally validated. See the
+[Beta 2 research specification](docs/beta2/research_specification.md) and
+[equation-to-code audit](docs/beta2/equation_to_code.md).
+
 The controller selected on validation is epoch 19. On the 130-case test its mean Dice, the unweighted mean of whole tumor, tumor core, and enhancing tumor, is **0.87344**. The best single expert on that same test is the CNN at **0.86844**. The controller is higher on all three regions. These scores are not an accuracy percentage and they are not evidence of clinical effectiveness.
 
 | Model | WT Dice | TC Dice | ET Dice | Mean Dice |

@@ -1,0 +1,50 @@
+# Beta 2 observational-analysis configuration.
+# This is not a brats_debate.config.load_config training/inference config.
+# It references the frozen Beta 1 inputs and writes only to a separate output.
+schema: canceragents_beta2_foundation_v1
+research_only: true
+
+baseline:
+  git_commit: 12eba663af858855fe82cd3ca804380fefd3d1ae
+  config: ../brats_controller.yaml
+  manifest: ../../docs/beta1/manifest.json
+  protocol_hash: 721b8dcb3bb3a6f84ad82c7ee78a443bef8754743aebc88368e0123159477d98
+  split_hash: 705cf73c10ab6d047b095c461fe8c71329b3e0a3ee01f925ced205747102cfe2
+  controller_sha256: 86b604082a934a1d4f4a68467a88d16d268ae7653c552dcfc6c3087ba1d79fe2
+
+output_dir: ../../outputs/beta2/foundation
+
+probability:
+  class_order: [0, 1, 2, 3]
+  expert_order: [cnn, transformer, boundary, highres]
+  normalization_tolerance: 0.0001
+  require_aligned_grid: true
+  explicit_availability: true
+
+analysis:
+  high_disagreement_threshold: 0.25
+  regions:
+    WT: [1, 2, 3]
+    TC: [1, 3]
+    ET: [3]
+
+split_policy:
+  grouping: subject
+  fitting_roles: [validation]
+  calibration_roles: [validation]
+  evaluation_roles: [validation]
+  cross_fit_required: true
+  beta1_test_use: forbidden_for_fit_calibration_tuning_or_selection
+  limitation: >-
+    Beta 1 checkpoint selection used the full validation split. Cross-fitted
+    Beta 2 analyses on validation are exploratory, not independent confirmation.
+
+status:
+  probability_foundation: tested
+  disagreement_foundation: tested
+  expert_trust: tested
+  real_data_evaluation: not_started
+  error_prediction: proposed
+  calibration: proposed
+  probabilistic_volume: proposed
+  active_perception: proposed
