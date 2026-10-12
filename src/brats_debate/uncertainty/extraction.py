@@ -6,11 +6,15 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 from typing import Mapping
 
 import numpy as np
+import torch
 
 from ..config import SEGMENTATION_EXPERTS, fingerprint, protocol
+from ..debate.features import controller_features, stack_evidence
+from ..inference.patches import sliding_predict
 from .disagreement import analyze_uncertainty
 from .error_prediction import construct_error_target, inverse_probability_weights
 
@@ -158,15 +162,288 @@ def _binary_boundary(mask: np.ndarray) -> np.ndarray:
     return mask ^ ndimage.binary_erosion(mask, iterations=1, border_value=0)
 
 
+def _compact_expert_output(name, output):
+    extra = output.get("extra") or {}
+    required_extra = ("margin", "availability")
+    missing = [key for key in required_extra if key not in extra]
+    if name == "boundary":
+        missing.extend(
+            key
+            for key in ("boundary_probability", "distance_to_boundary")
+            if key not in extra
+        )
+    if missing:
+        raise ValueError(f"expert {name} is missing Stage B tensors {missing}")
+    kept_extra = {key: extra[key] for key in required_extra}
+    if name == "boundary":
+        kept_extra.update(
+            boundary_probability=extra["boundary_probability"],
+            distance_to_boundary=extra["distance_to_boundary"],
+        )
+    compact = {
+        key: output[key]
+        for key in ("probabilities", "uncertainty", "confidence", "features")
+    }
+    compact["extra"] = kept_extra
+    return compact
+
+
+def compact_expert_outputs(
+    outputs: Mapping[str, Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Keep only exact tensors needed by the Stage B gate and feature schema."""
+
+    if tuple(outputs) != tuple(SEGMENTATION_EXPERTS):
+        raise ValueError("all four frozen experts in canonical order are required")
+    return {
+        name: _compact_expert_output(name, outputs[name])
+        for name in SEGMENTATION_EXPERTS
+    }
+
+
+@torch.inference_mode()
+def predict_experts_compact(patient, models, cfg, device):
+    """Production-equivalent expert inference with Stage B-only early release.
+
+    Hard segmentations for the first three experts remain live only until the
+    unchanged HighRes proposal has been formed. Rich logits and unused extras
+    are released immediately after each expert.
+    """
+
+    if tuple(models) != tuple(SEGMENTATION_EXPERTS):
+        raise ValueError("compact inference requires canonical four-expert order")
+    image = torch.from_numpy(patient["image"])[None]
+    outputs, proposal_segmentations = {}, []
+    inference = cfg["inference"]
+    for name, model in models.items():
+        proposal = None
+        if name == "highres":
+            if len(outputs) != 3 or len(proposal_segmentations) != 3:
+                raise ValueError(
+                    "HighRes proposal inference requires CNN, transformer, boundary first"
+                )
+            votes = torch.stack(
+                [(segmentation > 0) for segmentation in proposal_segmentations]
+            ).any(0)[:, None]
+            uncertain = (
+                torch.stack(
+                    [output["uncertainty"] for output in outputs.values()]
+                ).mean(0)
+                > inference["uncertainty_threshold"]
+            )
+            proposal = (votes | uncertain).float()
+            proposal_segmentations.clear()
+        model.to(device)
+        try:
+            rich = sliding_predict(
+                model,
+                image,
+                (
+                    cfg["highres_patch_size"]
+                    if name == "highres"
+                    else cfg["crop_size"]
+                ),
+                device,
+                inference["overlap"],
+                inference["mc_samples"],
+                proposal,
+                (
+                    inference["highres_max_patches"]
+                    if name == "highres"
+                    else None
+                ),
+            )
+        finally:
+            model.cpu()
+        if name != "highres":
+            proposal_segmentations.append(rich["segmentation"])
+        outputs[name] = _compact_expert_output(name, rich)
+        del rich
+    return outputs
+
+
+def _slice_outputs(outputs, spatial_slices):
+    return {
+        name: {
+            **{
+                key: value[(..., *spatial_slices)]
+                for key, value in output.items()
+                if key != "extra"
+            },
+            "extra": {
+                key: value[(..., *spatial_slices)]
+                for key, value in output["extra"].items()
+            },
+        }
+        for name, output in outputs.items()
+    }
+
+
+@torch.inference_mode()
+def stream_controller_and_uncertainty(
+    controller,
+    image: torch.Tensor,
+    outputs: Mapping[str, Mapping[str, object]],
+    cfg: Mapping[str, object],
+    device: torch.device,
+    *,
+    slab_depth: int = 8,
+    return_weights: bool = False,
+) -> tuple[torch.Tensor, dict[str, object], torch.Tensor | None]:
+    """Gate independent slabs and retain only final, JS, and entropy volumes.
+
+    The existing Stage A formulas and frozen controller are called on each
+    slab. All reductions are over expert/class axes, so slab partitioning does
+    not change the voxel-local mathematics.
+    """
+
+    if image.ndim != 5 or image.shape[0] != 1 or slab_depth < 1:
+        raise ValueError("streaming requires one [1,C,D,H,W] image and a positive slab")
+    compact = compact_expert_outputs(outputs)
+    shape = tuple(image.shape[2:])
+    classes = len(cfg["label_mapping"])
+    final = torch.empty((1, classes, *shape), dtype=torch.float32)
+    js = torch.empty((1, 1, *shape), dtype=torch.float32)
+    entropy = torch.empty((1, 1, *shape), dtype=torch.float32)
+    weights = (
+        torch.empty((1, len(SEGMENTATION_EXPERTS), *shape), dtype=torch.float32)
+        if return_weights
+        else None
+    )
+    maximum_residual = 0.0
+    maximum_production_js_difference = 0.0
+    maximum_controller_reconstruction_residual = 0.0
+    maximum_probability_sum_residual = 0.0
+    debate_seconds = controller_seconds = 0.0
+    controller.to(device)
+    try:
+        for start in range(0, shape[0], slab_depth):
+            spatial_slices = (
+                slice(start, min(start + slab_depth, shape[0])),
+                slice(None),
+                slice(None),
+            )
+            local = _slice_outputs(compact, spatial_slices)
+            debate_start = time.perf_counter()
+            uncertainty = analyze_uncertainty(local)
+            debate = uncertainty["production"]
+            debate_seconds += time.perf_counter() - debate_start
+
+            controller_start = time.perf_counter()
+            features = controller_features(
+                image[(..., *spatial_slices)], local, debate
+            )
+            probabilities, availability = stack_evidence(local)
+            device_features = features.to(device)
+            device_probabilities = probabilities.to(device)
+            device_availability = availability.to(device)
+            result = controller(
+                device_features,
+                device_probabilities,
+                device_availability,
+            )
+            reconstructed = (
+                device_probabilities * result["weights"].unsqueeze(2)
+            ).sum(1)
+            final[(..., *spatial_slices)] = result["probabilities"].cpu()
+            if weights is not None:
+                weights[(..., *spatial_slices)] = result["weights"].cpu()
+            controller_seconds += time.perf_counter() - controller_start
+
+            js[(..., *spatial_slices)] = uncertainty["js_divergence"]
+            entropy[(..., *spatial_slices)] = uncertainty[
+                "mean_predictive_entropy"
+            ]
+            maximum_residual = max(
+                maximum_residual,
+                float(
+                    uncertainty["js_identity_residual"].max().detach().cpu()
+                ),
+            )
+            maximum_production_js_difference = max(
+                maximum_production_js_difference,
+                float(
+                    (
+                        uncertainty["js_divergence"]
+                        - debate["js_divergence"]
+                    )
+                    .abs()
+                    .max()
+                    .detach()
+                    .cpu()
+                ),
+            )
+            maximum_controller_reconstruction_residual = max(
+                maximum_controller_reconstruction_residual,
+                float(
+                    (result["probabilities"] - reconstructed)
+                    .abs()
+                    .max()
+                    .detach()
+                    .cpu()
+                ),
+            )
+            maximum_probability_sum_residual = max(
+                maximum_probability_sum_residual,
+                float(
+                    (result["probabilities"].sum(1) - 1)
+                    .abs()
+                    .max()
+                    .detach()
+                    .cpu()
+                ),
+            )
+            del (
+                reconstructed,
+                result,
+                probabilities,
+                availability,
+                features,
+                device_availability,
+                device_probabilities,
+                device_features,
+                debate,
+                uncertainty,
+                local,
+            )
+    finally:
+        controller.cpu()
+    return (
+        final,
+        {
+            "js_disagreement": js,
+            "predictive_entropy": entropy,
+            "js_identity_max_residual": maximum_residual,
+            "equivalence": {
+                "stage_a_vs_production_js_max_abs_difference": (
+                    maximum_production_js_difference
+                ),
+                "controller_reconstruction_max_abs_difference": (
+                    maximum_controller_reconstruction_residual
+                ),
+                "probability_sum_max_abs_residual": (
+                    maximum_probability_sum_residual
+                ),
+            },
+            "host_timing_seconds": {
+                "debate_and_uncertainty": debate_seconds,
+                "controller": controller_seconds,
+            },
+        },
+        weights,
+    )
+
+
 def extract_sampled_case(
     patient: Mapping[str, object],
     outputs: Mapping[str, Mapping[str, object]],
-    debate: Mapping[str, object],
+    debate: Mapping[str, object] | None,
     final_probabilities,
     cfg: Mapping[str, object],
     *,
     subject_id: str,
     policy: VoxelSamplingPolicy,
+    uncertainty_maps: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Create a compact sampled representation and discard no provenance."""
 
@@ -196,19 +473,32 @@ def extract_sampled_case(
     prediction = final.argmax(1)[0].astype(np.int16)
     error = construct_error_target(prediction, target).astype(bool)
 
-    uncertainty = analyze_uncertainty(outputs)
-    js = _scalar_volume(
-        uncertainty["js_divergence"], target.shape, "JS disagreement"
-    )
+    if uncertainty_maps is None:
+        if debate is None:
+            raise ValueError("legacy extraction requires the production debate")
+        uncertainty = analyze_uncertainty(outputs)
+        js_source = uncertainty["js_divergence"]
+        entropy_source = uncertainty["mean_predictive_entropy"]
+        maximum_residual = float(
+            uncertainty["js_identity_residual"].max().detach().cpu()
+        )
+        production_js = _scalar_volume(
+            debate["js_divergence"], target.shape, "production JS disagreement"
+        )
+    else:
+        js_source = uncertainty_maps["js_disagreement"]
+        entropy_source = uncertainty_maps["predictive_entropy"]
+        maximum_residual = float(
+            uncertainty_maps["js_identity_max_residual"]
+        )
+        production_js = None
+    js = _scalar_volume(js_source, target.shape, "JS disagreement")
     entropy = _scalar_volume(
-        uncertainty["mean_predictive_entropy"],
-        target.shape,
-        "predictive entropy",
+        entropy_source, target.shape, "predictive entropy"
     )
-    production_js = _scalar_volume(
-        debate["js_divergence"], target.shape, "production JS disagreement"
-    )
-    if not np.allclose(js, production_js, atol=1e-6, rtol=0):
+    if production_js is not None and not np.allclose(
+        js, production_js, atol=1e-6, rtol=0
+    ):
         raise ValueError("Stage A and production JS disagreement do not match")
     if (js < -1e-6).any() or (js > 1 + 1e-6).any():
         raise ValueError("normalized JS disagreement is outside [0,1]")
@@ -312,9 +602,7 @@ def extract_sampled_case(
             "weighted_sample_error_prevalence": float(
                 np.average(y, weights=sample_weight)
             ),
-            "js_identity_max_residual": float(
-                uncertainty["js_identity_residual"].max().detach().cpu()
-            ),
+            "js_identity_max_residual": maximum_residual,
             "controller_prediction_labels": sorted(
                 int(value) for value in np.unique(prediction)
             ),

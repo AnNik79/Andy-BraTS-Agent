@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import torch
@@ -30,13 +31,10 @@ from brats_debate.data.brats_dataset import (
     subject_id,
     validate_training_audit,
 )
-from brats_debate.debate.disagreement import analyze_disagreement
 from brats_debate.inference.pipeline import (
     expert_checkpoint_path,
-    gate_volume,
     load_controller,
     load_experts,
-    predict_experts,
 )
 from brats_debate.training.train_controller import (
     assert_split_isolation,
@@ -49,7 +47,9 @@ from brats_debate.uncertainty.extraction import (
     case_provenance,
     extract_sampled_case,
     load_case_artifact,
+    predict_experts_compact,
     save_case_artifact,
+    stream_controller_and_uncertainty,
 )
 
 
@@ -123,6 +123,66 @@ def swap_used_mib():
         return None
     value, unit = float(match.group(1)), match.group(2)
     return value * {"K": 1 / 1024, "M": 1, "G": 1024}[unit]
+
+
+def mps_memory_mib():
+    if not torch.backends.mps.is_available():
+        return None
+    return {
+        "current_allocated": torch.mps.current_allocated_memory() / 1024**2,
+        "driver_allocated": torch.mps.driver_allocated_memory() / 1024**2,
+        "recommended_max": torch.mps.recommended_max_memory() / 1024**2,
+    }
+
+
+class MPSMemoryMonitor:
+    """Sample allocator and driver memory without forcing synchronization."""
+
+    def __init__(self, interval_seconds=0.5):
+        self.interval_seconds = interval_seconds
+        self._stop = threading.Event()
+        self._thread = None
+        self._sample_count = 0
+        self._peak_current = 0
+        self._peak_driver = 0
+
+    def _sample(self):
+        if not torch.backends.mps.is_available():
+            return
+        self._sample_count += 1
+        self._peak_current = max(
+            self._peak_current, int(torch.mps.current_allocated_memory())
+        )
+        self._peak_driver = max(
+            self._peak_driver, int(torch.mps.driver_allocated_memory())
+        )
+
+    def _run(self):
+        while not self._stop.wait(self.interval_seconds):
+            self._sample()
+
+    def start(self):
+        self._sample()
+        if torch.backends.mps.is_available():
+            self._thread = threading.Thread(
+                target=self._run, name="mps-memory-monitor", daemon=True
+            )
+            self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(1.0, 2 * self.interval_seconds))
+            self._thread = None
+        self._sample()
+
+    def summary(self):
+        return {
+            "sampling_interval_seconds": self.interval_seconds,
+            "sample_count": self._sample_count,
+            "peak_current_allocated_mib": self._peak_current / 1024**2,
+            "peak_driver_allocated_mib": self._peak_driver / 1024**2,
+        }
 
 
 def checkpoint_hashes(cfg):
@@ -207,6 +267,11 @@ def main():
             flush=True,
         )
         return
+    if artifact_path.exists() or summary_path.exists():
+        raise RuntimeError(
+            "refusing to replace an existing pilot artifact with different "
+            "provenance; select a new permitted validation patient"
+        )
 
     start = time.perf_counter()
     swap_before = swap_used_mib()
@@ -214,7 +279,9 @@ def main():
     device = device_for(cfg["device"])
     if device.type != "mps" or not torch.backends.mps.is_available():
         raise RuntimeError("the approved real-case pilot requires configured MPS")
-    models = controller = patient = outputs = debate = final = weights = None
+    models = controller = patient = outputs = final = uncertainty_maps = None
+    memory_monitor = MPSMemoryMonitor()
+    memory_monitor.start()
     previous_handler = signal.signal(signal.SIGALRM, _timeout)
     signal.alarm(args.max_seconds)
     try:
@@ -230,26 +297,40 @@ def main():
         load_seconds = time.perf_counter() - load_start
 
         expert_start = time.perf_counter()
-        outputs = predict_experts(patient, models, cfg, device)
+        outputs = predict_experts_compact(patient, models, cfg, device)
         expert_seconds = time.perf_counter() - expert_start
+        mps_before_phase_cleanup = mps_memory_mib()
+        gc.collect()
+        # Expert models have returned to CPU. Release only their dead cached MPS
+        # blocks once, at this phase boundary, rather than clearing per slab.
+        torch.mps.empty_cache()
+        mps_after_phase_cleanup = mps_memory_mib()
 
         gate_start = time.perf_counter()
-        debate = analyze_disagreement(outputs)
         image = torch.from_numpy(patient["image"])[None]
-        final, weights = gate_volume(
-            controller, image, outputs, debate, cfg, device
+        final, uncertainty_maps, _ = stream_controller_and_uncertainty(
+            controller,
+            image,
+            outputs,
+            cfg,
+            device,
+            slab_depth=8,
+            return_weights=False,
         )
         gate_seconds = time.perf_counter() - gate_start
+        gate_component_seconds = uncertainty_maps["host_timing_seconds"]
+        numerical_equivalence = uncertainty_maps["equivalence"]
 
         extraction_start = time.perf_counter()
         artifact = extract_sampled_case(
             patient,
             outputs,
-            debate,
+            None,
             final,
             cfg,
             subject_id=case_subject,
             policy=policy,
+            uncertainty_maps=uncertainty_maps,
         )
         extraction_seconds = time.perf_counter() - extraction_start
         runtime_before_save = time.perf_counter() - start
@@ -259,9 +340,16 @@ def main():
             "checkpoint_and_patient_load_seconds": load_seconds,
             "expert_inference_seconds": expert_seconds,
             "controller_and_debate_seconds": gate_seconds,
+            "controller_host_seconds": gate_component_seconds["controller"],
+            "debate_and_uncertainty_host_seconds": gate_component_seconds[
+                "debate_and_uncertainty"
+            ],
             "feature_extraction_seconds": extraction_seconds,
             "runtime_before_save_seconds": runtime_before_save,
             "peak_rss_mib_before_save": peak_rss_mib(),
+            "mps_sampled_peaks": memory_monitor.summary(),
+            "mps_before_phase_cleanup_mib": mps_before_phase_cleanup,
+            "mps_after_phase_cleanup_mib": mps_after_phase_cleanup,
             "swap_used_mib_before": swap_before,
             "swap_used_mib_before_save": swap_used_mib(),
         }
@@ -286,6 +374,10 @@ def main():
                 "checkpoint_and_patient_load": load_seconds,
                 "expert_inference": expert_seconds,
                 "controller_and_debate": gate_seconds,
+                "controller_host": gate_component_seconds["controller"],
+                "debate_and_uncertainty_host": gate_component_seconds[
+                    "debate_and_uncertainty"
+                ],
                 "feature_extraction": extraction_seconds,
                 "artifact_save": save_seconds,
                 "total": total_seconds,
@@ -293,11 +385,14 @@ def main():
             },
             "resources": {
                 "peak_rss_mib": peak_rss_mib(),
+                "mps_sampled_peaks": memory_monitor.summary(),
+                "mps_after_mib": mps_memory_mib(),
                 "swap_used_mib_before": swap_before,
                 "swap_used_mib_after": swap_used_mib(),
                 "disk_free_bytes_before": free_before,
                 "disk_free_bytes_after": free_after,
             },
+            "numerical_equivalence": numerical_equivalence,
             "metadata": artifact["metadata"],
             "provenance": provenance,
         }
@@ -308,6 +403,7 @@ def main():
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous_handler)
+        memory_monitor.stop()
         if controller is not None:
             try:
                 controller.cpu()
@@ -319,7 +415,7 @@ def main():
                     model.cpu()
                 except Exception:
                     pass
-        del weights, final, debate, outputs, patient, controller, models
+        del uncertainty_maps, final, outputs, patient, controller, models
         gc.collect()
         if torch.backends.mps.is_available():
             torch.mps.empty_cache()

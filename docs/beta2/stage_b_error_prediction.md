@@ -3,7 +3,8 @@
 Status: **Implemented and synthetically tested. One real validation case passed
 an engineering extraction pilot; no model was fitted, calibrated, or
 experimentally evaluated.** See
-[`stage_b_one_case_pilot.md`](stage_b_one_case_pilot.md).
+[`stage_b_one_case_pilot.md`](stage_b_one_case_pilot.md) and the subsequent
+[`stage_b_memory_audit.md`](stage_b_memory_audit.md).
 
 ## Scope
 
@@ -87,7 +88,7 @@ verification check.
 - Source cases must belong to frozen validation and not test.
 - Artifacts are written to a temporary file, flushed, and atomically renamed.
 - Resume requires exact provenance and patient identity.
-- Stale, partial, or mismatched artifacts are recomputed.
+- The one-case runner refuses to overwrite stale or mismatched artifacts.
 - Full expert/controller tensors remain in memory only for one case and are
   released before the next case.
 - The one-case runner is `scripts/beta2_error_pilot.py`; it refuses a time

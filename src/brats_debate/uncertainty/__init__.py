@@ -23,7 +23,13 @@ from .error_prediction import (
     error_prediction_metrics,
     predict_risk_map,
 )
-from .extraction import VoxelSamplingPolicy, extract_sampled_case
+from .extraction import (
+    VoxelSamplingPolicy,
+    compact_expert_outputs,
+    extract_sampled_case,
+    predict_experts_compact,
+    stream_controller_and_uncertainty,
+)
 from .partitions import make_subject_partitions, validate_subject_partitions
 
 __all__ = [
@@ -33,6 +39,7 @@ __all__ = [
     "VoxelSamplingPolicy",
     "analyze_expert_trust",
     "analyze_uncertainty",
+    "compact_expert_outputs",
     "construct_error_target",
     "entropy_map",
     "error_prediction_metrics",
@@ -40,8 +47,10 @@ __all__ = [
     "make_subject_partitions",
     "masked_mean_probability",
     "predict_risk_map",
+    "predict_experts_compact",
     "stack_expert_probabilities",
     "summarize_uncertainty_maps",
+    "stream_controller_and_uncertainty",
     "validate_probability_tensor",
     "validate_subject_partitions",
 ]
