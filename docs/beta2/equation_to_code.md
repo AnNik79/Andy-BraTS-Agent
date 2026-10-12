@@ -174,18 +174,20 @@ Per-class expert variance, hard-vote disagreement
 `E(v) = 1[y_hat(v) != y(v)]`, where `y_hat` is the frozen controller label.
 
 1. **Definition:** multiclass hard-label error at a voxel.
-2. **Existing implementation:** generic segmentation error maps.
-3. **Source files:** `analysis/error_maps.py`.
-4. **Missing functionality:** a streamed Beta 2 dataset joining frozen
-   controller outputs with predictors.
+2. **Existing implementation:** generic segmentation error maps plus the Stage
+   B frozen-controller target constructor.
+3. **Source files:** `analysis/error_maps.py`,
+   `uncertainty/error_prediction.py`, and `uncertainty/extraction.py`.
+4. **Missing functionality:** real-cohort aggregation beyond the bounded pilot.
 5. **Inputs:** controller segmentation and ground truth.
 6. **Supervision:** ground-truth segmentation is mandatory.
-7. **New code:** no duplicate map implementation is needed.
+7. **New code:** `construct_error_target` and atomic sampled-case extraction.
 8. **Limitations:** voxels are spatially and subject-correlated; class error is
    distinct from WT/TC/ET binary-region error.
-9. **Tests:** existing false-positive/false-negative/region-map tests.
+9. **Tests:** false-positive/false-negative/region maps, label alignment,
+   integer/finite validation, and sampled-artifact targets.
 10. **Experiment:** construct targets only on permitted development subjects.
-    Status: **Implemented, Tested; dataset construction Proposed**.
+    Status: **Implemented, Tested; cohort extraction not run**.
 
 ## 8. Conditional error risk
 
@@ -195,22 +197,24 @@ Per-class expert variance, hard-vote disagreement
 
 1. **Definition:** conditional probability of frozen-controller error from
    disagreement alone or combined evidence.
-2. **Existing implementation:** descriptive AUROC/enrichment exists, but no
-   calibrated conditional model.
+2. **Existing implementation:** descriptive AUROC/enrichment and three
+   regularized logistic baselines.
 3. **Source files:** `evaluation/disagreement_analysis.py`,
-   `evaluation/evaluate.py`, and future `uncertainty/error_prediction.py`.
-4. **Missing functionality:** grouped sampling, model fitting, calibration, and
-   held-out evaluation.
+   `evaluation/evaluate.py`, `uncertainty/error_prediction.py`,
+   `uncertainty/partitions.py`, and `uncertainty/extraction.py`.
+4. **Missing functionality:** real-data fitting, calibration, held-out
+   evaluation, and patient bootstrap intervals.
 5. **Inputs:** JS/other disagreement, entropy, boundary features, restricted MRI
    evidence, and error target.
 6. **Supervision:** controller error labels on fit/calibration partitions.
-7. **New code:** Stage B error-prediction dataset/model/evaluation modules.
+7. **New code:** disagreement-only, entropy-only, and combined models; grouped
+   partitions; prevalence-aware sampling; metrics; serialization.
 8. **Limitations:** these conditionals depend on data distribution and feature
    definition; they are not identified by descriptive correlation.
 9. **Tests:** group isolation, feature ordering, bounded outputs, and no test
    subjects.
 10. **Experiment:** disagreement-only, entropy-only, and combined held-out
-    comparisons. Status: **Proposed**.
+    comparisons. Status: **Implemented, Tested; not experimentally evaluated**.
 
 ## 9. Logistic error model and reliability
 
@@ -221,11 +225,11 @@ and `Q(v)=1-q(v)`.
 
 1. **Definition:** calibrated estimate of hard segmentation error, followed by
    correctness reliability.
-2. **Existing implementation:** none; schema placeholders are not producers.
-3. **Source files:** future `uncertainty/error_prediction.py` and
-   `uncertainty/calibration.py`.
-4. **Missing functionality:** all fitting, calibration, persistence, and map
-   export.
+2. **Existing implementation:** logistic `q`, Platt calibration, reliability
+   `1-q`, metrics, persistence, and in-memory risk-map output.
+3. **Source files:** `uncertainty/error_prediction.py`.
+4. **Missing functionality:** real-data fit/calibration/evaluation, patient
+   bootstrap intervals, and aligned NIfTI export.
 5. **Inputs:** vector-valued feature blocks, frozen error targets, subject IDs.
 6. **Supervision:** disjoint subject-grouped fit and calibration labels.
 7. **New code:** regularized logistic baselines, calibration fit/transform, and
@@ -235,7 +239,8 @@ and `Q(v)=1-q(v)`.
 9. **Tests:** sigmoid range, known synthetic coefficients, calibration
    monotonicity, persistence, and group leakage.
 10. **Experiment:** AUROC, AUPRC, Brier, log loss, reliability curves, and
-    high-risk enrichment with patient bootstrap intervals. Status: **Proposed**.
+    high-risk enrichment with patient bootstrap intervals. Status:
+    **Implemented, Tested; not experimentally evaluated**.
 
 ## 10. Controller simplex and fusion
 

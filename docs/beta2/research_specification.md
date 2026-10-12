@@ -345,6 +345,13 @@ new data must be approved first.
 - Probability variance, vote disagreement, pairwise reuse, and generic
   region/boundary summaries.
 - Controller trust/oracle/fusion fix-harm metrics.
+- Voxel error targets; disagreement-only, entropy-only, and combined
+  regularized logistic baselines.
+- Subject-grouped fit/calibration/evaluation utilities, Platt calibration,
+  AUROC/AUPRC/Brier/log-loss/reliability metrics, JSON model provenance, and
+  calibrated-versus-uncalibrated risk-map interfaces.
+- Atomic resumable per-case sampled-voxel extraction with exact inclusion
+  probabilities and inverse-probability weights.
 - Synthetic mathematical and frozen-manifest integrity tests.
 
 ### Implemented in Beta 1 and reused
@@ -355,9 +362,9 @@ new data must be approved first.
 
 ### Proposed
 
-- Error model, calibration, reliability exports, probabilistic volume,
-  anatomical loss surrogates, conditional-information ablations, active
-  perception, and expanded reasoning schema.
+- Real-data fitting/calibration/evaluation, NIfTI reliability exports,
+  probabilistic volume, anatomical loss surrogates, conditional-information
+  ablations, active perception, and expanded reasoning schema.
 
 ### Blocked
 

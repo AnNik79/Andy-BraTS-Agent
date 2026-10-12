@@ -14,6 +14,23 @@ baseline:
 
 output_dir: ../../outputs/beta2/foundation
 
+stage_b:
+  output_dir: ../../outputs/beta2/error_prediction
+  pilot_output_dir: ../../outputs/beta2/error_prediction_pilot
+  source_split: validation
+  exploratory: true
+  partition_seed: 20261012
+  partition_fractions: {fit: 0.60, calibration: 0.20, evaluation: 0.20}
+  feature_schema: beta2_error_features_v1
+  sampling:
+    seed: 20261012
+    maximum_voxels_per_case: 80000
+    error: 20000
+    boundary_correct: 10000
+    foreground_correct: 20000
+    other_correct: 30000
+    inverse_probability_weighted: true
+
 probability:
   class_order: [0, 1, 2, 3]
   expert_order: [cnn, transformer, boundary, highres]
@@ -44,7 +61,8 @@ status:
   disagreement_foundation: tested
   expert_trust: tested
   real_data_evaluation: not_started
-  error_prediction: proposed
-  calibration: proposed
+  error_prediction: implemented_and_synthetically_tested
+  calibration: implemented_and_synthetically_tested
+  streaming_extraction: implemented_and_synthetically_tested
   probabilistic_volume: proposed
   active_perception: proposed
