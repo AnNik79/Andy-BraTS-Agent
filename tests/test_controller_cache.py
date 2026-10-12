@@ -64,7 +64,9 @@ def test_controller_config_keeps_frozen_protocol_and_checkpoints():
     assert cfg["patches_per_patient"] == 4
     assert cfg["crop_size"] == [64, 64, 64]
     assert cfg["device"] == "mps"
-    assert cfg["evaluation"]["hd95"] is False
+    # The frozen final-test config enables HD95. Deferred controller validation
+    # still calls segmentation_metrics(..., hd95=False) explicitly.
+    assert cfg["evaluation"]["hd95"] is True
     assert set(cfg["expert_checkpoints"]) == set(SEGMENTATION_EXPERTS)
     assert "llm" not in cfg["expert_checkpoints"]
     for path in cfg["expert_checkpoints"].values():

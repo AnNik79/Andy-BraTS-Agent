@@ -98,7 +98,9 @@ def install_experts(monkeypatch, loaded, predicted):
     def predict(patient, _models, cfg, device):
         assert cfg["inference"]["highres_max_patches"] == 128
         assert cfg["inference"]["overlap"] == 0.5
-        assert cfg["evaluation"]["hd95"] is False
+        # This is the frozen final-evaluation setting. Controller checkpoint
+        # validation independently fixes hd95=False in score_controller_metrics.
+        assert cfg["evaluation"]["hd95"] is True
         assert device.type == "cpu"
         predicted.append(patient["patient_id"])
         return expert_outputs(patient)
@@ -417,4 +419,4 @@ def test_real_config_keeps_controller_inference_settings():
     assert cfg["controller_epochs"] == 20
     assert cfg["inference"]["highres_max_patches"] == 128
     assert cfg["inference"]["overlap"] == 0.5
-    assert cfg["evaluation"]["hd95"] is False
+    assert cfg["evaluation"]["hd95"] is True
