@@ -4,6 +4,7 @@ import math
 from typing import Mapping
 
 import torch
+import torch.nn.functional as F
 
 from ..config import SEGMENTATION_EXPERTS
 from ..debate.disagreement import analyze_disagreement
@@ -19,8 +20,11 @@ def entropy_map(
 ) -> torch.Tensor:
     """Shannon entropy with the class dimension retained."""
 
-    p = probabilities.float().clamp_min(epsilon)
-    entropy = -(p * p.log()).sum(class_dim, keepdim=True)
+    p = probabilities.float()
+    terms = torch.where(
+        p > 0, p * p.clamp_min(epsilon).log(), torch.zeros_like(p)
+    )
+    entropy = -terms.sum(class_dim, keepdim=True)
     if normalized:
         entropy = entropy / math.log(probabilities.shape[class_dim])
     return entropy
@@ -31,7 +35,7 @@ def _output_availability(output: Mapping[str, object]) -> torch.Tensor:
     if not torch.is_tensor(probabilities):
         raise TypeError("expert output probabilities must be a torch.Tensor")
     extra = output.get("extra") or {}
-    return extra.get(
+    availability = extra.get(
         "availability",
         torch.ones(
             probabilities.shape[0],
@@ -40,6 +44,9 @@ def _output_availability(output: Mapping[str, object]) -> torch.Tensor:
             device=probabilities.device,
         ),
     )
+    if availability.ndim == 4:
+        availability = availability[:, None]
+    return availability
 
 
 def _as_mask(mask: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
@@ -116,11 +123,16 @@ def analyze_uncertainty(
     ordered_names = tuple(name for name in SEGMENTATION_EXPERTS if name in outputs)
     if not ordered_names:
         raise ValueError("at least one segmentation expert output is required")
-    ordered_outputs = {name: outputs[name] for name in ordered_names}
+    ordered_outputs = {}
+    for name in ordered_names:
+        extra = dict(outputs[name].get("extra") or {})
+        extra["availability"] = _output_availability(outputs[name])
+        ordered_outputs[name] = {**outputs[name], "extra": extra}
     batch = stack_expert_probabilities(
         {name: outputs[name]["probabilities"] for name in ordered_names},
         availability={
-            name: _output_availability(outputs[name]) for name in ordered_names
+            name: ordered_outputs[name]["extra"]["availability"]
+            for name in ordered_names
         },
         expert_order=SEGMENTATION_EXPERTS,
         class_order=class_order,
@@ -146,7 +158,28 @@ def analyze_uncertainty(
     kl = kl_terms.sum(2, keepdim=True)
     js_kl_raw = (kl * batch.availability).sum(1) / count
 
-    production = analyze_disagreement(ordered_outputs)
+    if len(ordered_outputs) > 1:
+        production = analyze_disagreement(ordered_outputs)
+    else:
+        availability = batch.availability[:, 0]
+        votes = (
+            F.one_hot(mean.argmax(1), classes)
+            .movedim(-1, 1)
+            .float()
+            * availability
+        )
+        zeros = torch.zeros_like(mean_raw)
+        production = {
+            "map": zeros,
+            "js_divergence": zeros,
+            "variance": torch.zeros_like(mean),
+            "prediction_entropy": mean_raw / log_classes,
+            "votes": votes,
+            "pairwise": {},
+            "average_probabilities": mean,
+            "majority_segmentation": votes.argmax(1),
+            "available_experts": count,
+        }
     vote_disagreement = (
         1 - production["votes"].max(1, keepdim=True).values / count
     ).clamp(0, 1)

@@ -160,14 +160,18 @@ def analyze_expert_trust(
     if (~available).all(1).any():
         raise ValueError("at least one expert must be available at every voxel")
 
-    fused = (
-        (p * weights[:, :, None]).sum(1)
-        if controller_probabilities is None
-        else validate_probability_tensor(
+    weighted_fusion = (p * weights[:, :, None]).sum(1)
+    if controller_probabilities is None:
+        fused = weighted_fusion
+    else:
+        fused = validate_probability_tensor(
             torch.as_tensor(controller_probabilities, device=p.device),
             classes=classes,
         )
-    )
+        if not torch.allclose(fused, weighted_fusion, atol=1e-5, rtol=1e-5):
+            raise ValueError(
+                "controller_probabilities must equal the supplied weighted expert fusion"
+            )
     if tuple(fused.shape) != (batch_size, classes, *spatial):
         raise ValueError("controller_probabilities must align with expert predictions")
 

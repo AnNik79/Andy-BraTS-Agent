@@ -80,6 +80,7 @@ def test_probability_alignment_missing_experts_and_availability():
 
 def test_entropy_and_js_identity_distinguish_uncertainty_from_disagreement():
     uniform = torch.full((1, 4, 2, 2, 2), 0.25)
+    assert entropy_map(_one_hot(0)).eq(0).all()
     outputs = {name: _output(uniform) for name in EXPERTS}
     analysis = analyze_uncertainty(outputs)
     assert analysis["equal_weight_four_expert_formula"] is True
@@ -126,8 +127,9 @@ def test_entropy_and_js_identity_distinguish_uncertainty_from_disagreement():
 
 
 def test_unavailable_expert_and_region_boundary_summaries():
-    availability = torch.ones(1, 1, 2, 2, 2)
-    availability[:, :, 0] = 0
+    # The public probability API accepts [B,D,H,W] as well as [B,1,D,H,W].
+    availability = torch.ones(1, 2, 2, 2)
+    availability[:, 0] = 0
     outputs = {
         "cnn": _output(_one_hot(0)),
         "transformer": _output(_one_hot(1), availability),
@@ -143,6 +145,14 @@ def test_unavailable_expert_and_region_boundary_summaries():
     assert analysis["summaries"]["synthetic_region"]["voxel_count"] == 4
     assert analysis["summaries"]["boundary"]["voxel_count"] == 4
     assert set(analysis["pairwise"]) == {"cnn__transformer"}
+
+
+def test_single_available_expert_has_zero_disagreement():
+    analysis = analyze_uncertainty({"cnn": _output(_one_hot(2))})
+    assert analysis["expert_names"] == ("cnn",)
+    assert analysis["js_divergence"].eq(0).all()
+    assert analysis["vote_disagreement"].eq(0).all()
+    assert analysis["pairwise"] == {}
 
 
 def test_gate_weights_remain_a_masked_simplex():
@@ -231,3 +241,26 @@ def test_expert_trust_rejects_invalid_or_unavailable_weights():
         analyze_expert_trust(
             p, weights, target, availability=availability
         )
+
+    inconsistent = _one_hot(1)
+    with pytest.raises(ValueError, match="must equal"):
+        analyze_expert_trust(
+            p, weights, target, controller_probabilities=inconsistent
+        )
+
+
+@pytest.mark.skipif(
+    not torch.backends.mps.is_available(), reason="MPS is unavailable"
+)
+def test_foundation_tensor_paths_run_on_mps():
+    device = torch.device("mps")
+    p = {name: _one_hot(0).to(device) for name in EXPERTS}
+    analysis = analyze_uncertainty(
+        {name: _output(value) for name, value in p.items()}
+    )
+    assert analysis["js_divergence"].device.type == "mps"
+
+    weights = torch.full((1, 4, 2, 2, 2), 0.25, device=device)
+    target = torch.zeros(1, 2, 2, 2, dtype=torch.long, device=device)
+    trust = analyze_expert_trust(p, weights, target)
+    assert trust["controller_probabilities"].device.type == "mps"
