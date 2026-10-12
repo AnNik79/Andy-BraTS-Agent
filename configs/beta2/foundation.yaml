@@ -60,7 +60,7 @@ status:
   probability_foundation: tested
   disagreement_foundation: tested
   expert_trust: tested
-  real_data_evaluation: not_started
+  real_data_evaluation: one_case_engineering_pilot_only
   error_prediction: implemented_and_synthetically_tested
   calibration: implemented_and_synthetically_tested
   streaming_extraction: implemented_and_synthetically_tested

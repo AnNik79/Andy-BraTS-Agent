@@ -1,7 +1,9 @@
 # Stage B error-prediction foundation
 
-Status: **Implemented and synthetically tested; not fitted or experimentally
-evaluated on real patients.**
+Status: **Implemented and synthetically tested. One real validation case passed
+an engineering extraction pilot; no model was fitted, calibrated, or
+experimentally evaluated.** See
+[`stage_b_one_case_pilot.md`](stage_b_one_case_pilot.md).
 
 ## Scope
 
