@@ -92,6 +92,46 @@ def test_second_batch_is_next_ten_unprocessed_fit_cases():
     assert all(case_id in manifest["partitions"]["fit"] for case_id in selected)
 
 
+def test_third_batch_is_next_ten_unprocessed_fit_cases():
+    manifest = json.loads(
+        (ROOT / "configs" / "beta2" / "subject_partitions.json").read_text()
+    )
+    case_to_subject = {
+        case_id: case_id.rsplit("-", 1)[0]
+        for case_id in manifest["allowed_case_ids"]
+    }
+    processed = {
+        "BraTS-GLI-00006-000",
+        "BraTS-GLI-00019-000",
+        "BraTS-GLI-00025-000",
+        "BraTS-GLI-00031-000",
+        "BraTS-GLI-00049-000",
+        "BraTS-GLI-00056-000",
+        "BraTS-GLI-00056-001",
+        "BraTS-GLI-00101-000",
+        "BraTS-GLI-00104-000",
+        "BraTS-GLI-00112-000",
+        "BraTS-GLI-00133-000",
+        "BraTS-GLI-00167-000",
+        "BraTS-GLI-00188-000",
+        "BraTS-GLI-00222-000",
+        "BraTS-GLI-00230-000",
+        "BraTS-GLI-00235-000",
+        "BraTS-GLI-00240-000",
+    }
+    profile = collection.BATCH_PROFILES["fit_collection_batch_20261013_03"]
+    selected = collection.select_fit_cases(
+        manifest,
+        case_to_subject,
+        processed,
+        count=10,
+        distinct_subjects=False,
+    )
+    assert selected == profile["cases"]
+    assert all(case_id in manifest["partitions"]["fit"] for case_id in selected)
+    assert len({case_to_subject[case_id] for case_id in selected}) == 10
+
+
 def test_collected_case_discovery_requires_complete_validation_provenance(tmp_path):
     valid = {
         "complete": True,
