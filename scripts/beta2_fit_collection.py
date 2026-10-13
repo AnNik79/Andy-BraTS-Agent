@@ -40,12 +40,33 @@ from brats_debate.uncertainty.extraction import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPERIMENT_NAME = "fit_collection_batch_20261013_01"
-EXPECTED_CASES = (
-    "BraTS-GLI-00049-000",
-    "BraTS-GLI-00056-000",
-    "BraTS-GLI-00101-000",
-)
+DEFAULT_BATCH_ID = "fit_collection_batch_20261013_01"
+BATCH_PROFILES = {
+    DEFAULT_BATCH_ID: {
+        "cases": (
+            "BraTS-GLI-00049-000",
+            "BraTS-GLI-00056-000",
+            "BraTS-GLI-00101-000",
+        ),
+        "distinct_subjects": True,
+    },
+    "fit_collection_batch_20261013_02": {
+        "cases": (
+            "BraTS-GLI-00056-001",
+            "BraTS-GLI-00104-000",
+            "BraTS-GLI-00112-000",
+            "BraTS-GLI-00133-000",
+            "BraTS-GLI-00167-000",
+            "BraTS-GLI-00188-000",
+            "BraTS-GLI-00222-000",
+            "BraTS-GLI-00230-000",
+            "BraTS-GLI-00235-000",
+            "BraTS-GLI-00240-000",
+        ),
+        "distinct_subjects": False,
+    },
+}
+EXPECTED_CASES = BATCH_PROFILES[DEFAULT_BATCH_ID]["cases"]
 
 
 def parse_args():
@@ -64,10 +85,11 @@ def parse_args():
         default=ROOT / "configs" / "beta2" / "subject_partitions.json",
     )
     parser.add_argument(
-        "--output",
-        type=Path,
-        default=ROOT / "outputs" / "beta2" / EXPERIMENT_NAME,
+        "--batch-id",
+        choices=tuple(BATCH_PROFILES),
+        default=DEFAULT_BATCH_ID,
     )
+    parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--max-seconds", type=int, default=3600)
     return parser.parse_args()
 
@@ -120,11 +142,15 @@ def discover_collected_cases(output_root):
     return collected
 
 
-def select_fit_cases(manifest, case_to_subject, processed, count=3):
+def select_fit_cases(
+    manifest, case_to_subject, processed, count=3, *, distinct_subjects=True
+):
     selected, selected_subjects = [], set()
     for case_id in manifest["partitions"]["fit"]:
         subject = case_to_subject[case_id]
-        if case_id in processed or subject in selected_subjects:
+        if case_id in processed or (
+            distinct_subjects and subject in selected_subjects
+        ):
             continue
         selected.append(case_id)
         selected_subjects.add(subject)
@@ -137,8 +163,12 @@ def select_fit_cases(manifest, case_to_subject, processed, count=3):
 
 def main():
     args = parse_args()
-    if args.max_seconds < 1 or args.max_seconds > 3600:
-        raise ValueError("--max-seconds must be in [1,3600]")
+    if args.max_seconds < 1 or args.max_seconds > 9900:
+        raise ValueError("--max-seconds must be in [1,9900]")
+    profile = BATCH_PROFILES[args.batch_id]
+    expected_cases = tuple(profile["cases"])
+    if args.output is None:
+        args.output = ROOT / "outputs" / "beta2" / args.batch_id
     args.output = args.output.resolve()
     if not args.output.is_relative_to(ROOT.resolve()):
         raise ValueError("collection output must remain on internal repository storage")
@@ -163,13 +193,21 @@ def main():
         stage_b_cfg=stage_b_cfg,
     )
     processed = discover_collected_cases(ROOT / "outputs" / "beta2")
-    selected = select_fit_cases(manifest, case_to_subject, processed)
-    if selected != EXPECTED_CASES:
+    selected = select_fit_cases(
+        manifest,
+        case_to_subject,
+        processed,
+        count=len(expected_cases),
+        distinct_subjects=bool(profile["distinct_subjects"]),
+    )
+    if selected != expected_cases:
         raise RuntimeError(
-            f"deterministic fit selection changed: expected {EXPECTED_CASES}, got {selected}"
+            f"deterministic fit selection changed: expected {expected_cases}, got {selected}"
         )
     selected_subjects = tuple(case_to_subject[case_id] for case_id in selected)
-    if len(set(selected_subjects)) != len(selected_subjects):
+    if profile["distinct_subjects"] and len(set(selected_subjects)) != len(
+        selected_subjects
+    ):
         raise RuntimeError("selected fit cases are not from distinct subjects")
     if set(selected) & set(splits["test"]):
         raise RuntimeError("historical test identities entered fit collection")
@@ -256,7 +294,7 @@ def main():
                 policy=policy,
                 provenance=provenance,
                 output=args.output,
-                experiment_name=EXPERIMENT_NAME,
+                experiment_name=args.batch_id,
                 case_index=index,
                 partition_role="fit",
             )
@@ -269,8 +307,8 @@ def main():
                 "partition_role": "fit",
                 "partition_manifest_hash": manifest["manifest_hash"],
                 "selection_rationale": (
-                    "First three unprocessed fit-partition cases in manifest order "
-                    "with distinct subjects; labels and performance were not inspected."
+                    f"First {len(selected)} unprocessed fit-partition cases in "
+                    "manifest order; labels and performance were not inspected."
                 ),
                 "completed_cases": [item["patient_id"] for item in completed],
                 "model_load_seconds": model_load_seconds,
@@ -322,8 +360,8 @@ def main():
             "partition_role": "fit",
             "partition_manifest_hash": manifest["manifest_hash"],
             "selection_rationale": (
-                "First three unprocessed fit-partition cases in manifest order "
-                "with distinct subjects; labels and performance were not inspected."
+                f"First {len(selected)} unprocessed fit-partition cases in "
+                "manifest order; labels and performance were not inspected."
             ),
             "completed_cases": [item["patient_id"] for item in completed],
             "total_seconds": time.perf_counter() - benchmark_start,
