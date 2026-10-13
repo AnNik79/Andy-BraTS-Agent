@@ -36,6 +36,7 @@ from brats_debate.training.train_controller import (
 from brats_debate.uncertainty.extraction import (
     VoxelSamplingPolicy,
     case_provenance,
+    load_case_artifact,
 )
 
 
@@ -91,6 +92,7 @@ def parse_args():
     )
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--max-seconds", type=int, default=3600)
+    parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
 
 
@@ -161,6 +163,54 @@ def select_fit_cases(
     return tuple(selected)
 
 
+def load_resume_state(output, selected, candidate_provenance):
+    summary_path = output / "collection.summary.json"
+    if not summary_path.is_file():
+        raise RuntimeError("resume requires an existing collection summary")
+    payload = json.loads(summary_path.read_text())
+    if payload.get("format") != "beta2_stage_b_fit_collection_v1":
+        raise ValueError("resume summary has an unexpected format")
+    if tuple(payload.get("selected_cases") or ()) != tuple(selected):
+        raise ValueError("resume summary case list differs from the fixed batch")
+    if payload.get("partition_role") != "fit":
+        raise ValueError("resume summary is not a fit collection")
+    completed = list(payload.get("cases") or [])
+    completed_ids = [item.get("patient_id") for item in completed]
+    if completed_ids != list(selected[: len(completed_ids)]):
+        raise ValueError("completed resume cases are not a prefix of the fixed batch")
+    if len(completed_ids) != len(set(completed_ids)):
+        raise ValueError("resume summary contains duplicate completed cases")
+    original_provenance = payload.get("provenance") or {}
+    original_science = {
+        key: value
+        for key, value in original_provenance.items()
+        if key != "code_commit"
+    }
+    candidate_science = {
+        key: value
+        for key, value in candidate_provenance.items()
+        if key != "code_commit"
+    }
+    if original_science != candidate_science:
+        raise ValueError("resume scientific provenance differs from the original run")
+    for case in completed:
+        artifact_path = Path(case["artifact"]).resolve()
+        if not artifact_path.is_relative_to(output.resolve()):
+            raise ValueError("resume artifact is outside the collection directory")
+        artifact = load_case_artifact(
+            artifact_path,
+            expected_provenance=case["provenance"],
+        )
+        if artifact["metadata"]["patient_id"] != case["patient_id"]:
+            raise ValueError("resume artifact patient identity mismatch")
+    return {
+        "completed": completed,
+        "prior_elapsed_seconds": float(payload.get("total_seconds") or 0),
+        "prior_model_load_seconds": float(payload.get("model_load_seconds") or 0),
+        "provenance": original_provenance,
+    }
+
+
 def main():
     args = parse_args()
     if args.max_seconds < 1 or args.max_seconds > 9900:
@@ -172,8 +222,10 @@ def main():
     args.output = args.output.resolve()
     if not args.output.is_relative_to(ROOT.resolve()):
         raise ValueError("collection output must remain on internal repository storage")
-    if args.output.exists() and any(args.output.iterdir()):
+    if args.output.exists() and any(args.output.iterdir()) and not args.resume:
         raise RuntimeError("collection output directory is not empty")
+    if args.resume and not args.output.is_dir():
+        raise RuntimeError("resume collection directory does not exist")
 
     cfg = load_config(args.config)
     stage_b_cfg = yaml.safe_load(args.stage_b_config.read_text())["stage_b"]
@@ -193,6 +245,8 @@ def main():
         stage_b_cfg=stage_b_cfg,
     )
     processed = discover_collected_cases(ROOT / "outputs" / "beta2")
+    if args.resume:
+        processed -= set(expected_cases)
     selected = select_fit_cases(
         manifest,
         case_to_subject,
@@ -238,17 +292,27 @@ def main():
         "partition_manifest_hash": manifest["manifest_hash"],
         "partition_role": "fit",
     }
+    runner_commit = code_commit
     device = device_for(cfg["device"])
     if device.type != "mps" or not torch.backends.mps.is_available():
         raise RuntimeError("the approved collection batch requires MPS")
     if shutil.disk_usage(ROOT).free < MINIMUM_FREE_BYTES:
         raise BenchmarkStop("internal free space is below the 15 GiB threshold")
 
-    args.output.mkdir(parents=True, exist_ok=False)
-    (args.output / "cases").mkdir()
     overall_path = args.output / "collection.summary.json"
-    benchmark_start = time.perf_counter()
+    prior_elapsed_seconds = 0.0
+    prior_model_load_seconds = 0.0
     completed = []
+    if args.resume:
+        resume = load_resume_state(args.output, selected, provenance)
+        completed = resume["completed"]
+        prior_elapsed_seconds = resume["prior_elapsed_seconds"]
+        prior_model_load_seconds = resume["prior_model_load_seconds"]
+        provenance = resume["provenance"]
+    else:
+        args.output.mkdir(parents=True, exist_ok=False)
+        (args.output / "cases").mkdir()
+    benchmark_start = time.perf_counter()
     models = controller = None
     model_load_seconds = None
     status, error = "running", None
@@ -256,14 +320,19 @@ def main():
     def stop_handler(_signum, _frame):
         raise BenchmarkStop("collection safety or time limit triggered")
 
+    remaining_seconds = args.max_seconds - prior_elapsed_seconds
+    if remaining_seconds <= 0:
+        raise BenchmarkStop("collection has exhausted its cumulative time limit")
     previous_alarm = signal.signal(signal.SIGALRM, stop_handler)
     previous_safety = signal.signal(signal.SIGUSR1, stop_handler)
-    signal.alarm(args.max_seconds)
+    signal.alarm(max(1, int(remaining_seconds)))
     try:
         model_start = time.perf_counter()
         models, expert_hashes = load_experts(cfg, splits)
         controller, controller_hash = load_controller(cfg, splits, expert_hashes)
-        model_load_seconds = time.perf_counter() - model_start
+        model_load_seconds = (
+            prior_model_load_seconds + time.perf_counter() - model_start
+        )
         if (
             expert_hashes != expected_expert_hashes
             or controller_hash != expected_controller_hash
@@ -273,7 +342,9 @@ def main():
         for index, (case_id, record, case_subject) in enumerate(
             zip(selected, selected_records, selected_subjects)
         ):
-            elapsed = time.perf_counter() - benchmark_start
+            if case_id in {item["patient_id"] for item in completed}:
+                continue
+            elapsed = prior_elapsed_seconds + time.perf_counter() - benchmark_start
             if completed:
                 conservative_next = (
                     max(item["timings"]["total_seconds"] for item in completed) * 1.25
@@ -312,10 +383,13 @@ def main():
                 ),
                 "completed_cases": [item["patient_id"] for item in completed],
                 "model_load_seconds": model_load_seconds,
-                "elapsed_seconds": time.perf_counter() - benchmark_start,
+                "elapsed_seconds": (
+                    prior_elapsed_seconds + time.perf_counter() - benchmark_start
+                ),
                 "between_case_after_cleanup": resource_snapshot(args.output),
                 "cases": completed,
                 "provenance": provenance,
+                "resume_runner_commit": runner_commit if args.resume else None,
             }
             write_progress(overall_path, progress)
             print(
@@ -364,12 +438,15 @@ def main():
                 "manifest order; labels and performance were not inspected."
             ),
             "completed_cases": [item["patient_id"] for item in completed],
-            "total_seconds": time.perf_counter() - benchmark_start,
+            "total_seconds": (
+                prior_elapsed_seconds + time.perf_counter() - benchmark_start
+            ),
             "model_load_seconds": model_load_seconds,
             "error": error,
             "final_resources": resource_snapshot(args.output),
             "cases": completed,
             "provenance": provenance,
+            "resume_runner_commit": runner_commit if args.resume else None,
         }
         write_progress(overall_path, overall)
     print(json.dumps(overall, indent=2), flush=True)

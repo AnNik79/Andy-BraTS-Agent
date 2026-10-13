@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 import sys
 
+import pytest
+
 from brats_debate.config import fingerprint
 
 
@@ -110,3 +112,34 @@ def test_collected_case_discovery_requires_complete_validation_provenance(tmp_pa
     (tmp_path / "valid.summary.json").write_text(json.dumps(valid))
     (tmp_path / "invalid.summary.json").write_text(json.dumps(invalid))
     assert collection.discover_collected_cases(tmp_path) == {"validation-case"}
+
+
+def test_resume_preserves_original_scientific_provenance(tmp_path):
+    selected = ("case-a", "case-b")
+    original = {
+        "format": "beta2_stage_b_fit_collection_v1",
+        "selected_cases": list(selected),
+        "partition_role": "fit",
+        "cases": [],
+        "total_seconds": 123.0,
+        "model_load_seconds": 0.5,
+        "provenance": {
+            "protocol_hash": "protocol",
+            "split_hash": "split",
+            "partition_role": "fit",
+            "code_commit": "original-runner",
+        },
+    }
+    (tmp_path / "collection.summary.json").write_text(json.dumps(original))
+    candidate = {
+        **original["provenance"],
+        "code_commit": "resume-runner",
+    }
+    state = collection.load_resume_state(tmp_path, selected, candidate)
+    assert state["completed"] == []
+    assert state["prior_elapsed_seconds"] == 123.0
+    assert state["provenance"]["code_commit"] == "original-runner"
+
+    candidate["protocol_hash"] = "changed"
+    with pytest.raises(ValueError, match="scientific provenance"):
+        collection.load_resume_state(tmp_path, selected, candidate)
