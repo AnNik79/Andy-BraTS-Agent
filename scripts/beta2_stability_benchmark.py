@@ -391,6 +391,9 @@ def run_case(
     policy,
     provenance,
     output,
+    experiment_name=EXPERIMENT_NAME,
+    case_index=None,
+    partition_role=None,
 ):
     artifact_path = output / "cases" / f"{case_id}.npz"
     summary_path = output / "cases" / f"{case_id}.summary.json"
@@ -467,9 +470,14 @@ def run_case(
             "sampling_weights_valid": True,
         }
         artifact["metadata"]["benchmark"] = {
-            "experiment": EXPERIMENT_NAME,
+            "experiment": experiment_name,
             "same_process_sequential": True,
-            "case_index": APPROVED_CASES.index(case_id),
+            "case_index": (
+                APPROVED_CASES.index(case_id)
+                if case_index is None
+                else int(case_index)
+            ),
+            "partition_role": partition_role,
             "timings": timings,
             "numerical": numerical,
         }
@@ -503,6 +511,7 @@ def run_case(
         "patient_id": case_id,
         "subject_id": case_subject,
         "source_split": "validation",
+        "partition_role": partition_role,
         "artifact": str(artifact_path),
         "artifact_bytes": artifact_path.stat().st_size,
         "sample_count": sample_count,

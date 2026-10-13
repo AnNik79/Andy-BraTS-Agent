@@ -43,6 +43,13 @@ cases are explicitly forbidden. The controller was selected using the complete
 validation set, so these partitions do not constitute independent validation
 of the underlying segmenter.
 
+The fixed assignment is recorded in
+`configs/beta2/subject_partitions.json`: 111/41/39 cases and 101/35/34
+subjects for fit/calibration/evaluation. Its manifest hash, protocol hash, and
+frozen split hash are verified before collection. Cases are ordered
+lexicographically within each role; collection selection does not inspect
+labels or performance.
+
 The intended sequence is:
 
 1. fit each logistic baseline on fit subjects;
