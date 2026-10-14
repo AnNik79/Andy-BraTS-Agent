@@ -96,6 +96,16 @@ BATCH_PROFILES = {
         ),
         "distinct_subjects": False,
     },
+    "fit_collection_batch_20261014_01": {
+        "cases": (
+            "BraTS-GLI-00523-000",
+            "BraTS-GLI-00529-000",
+            "BraTS-GLI-00552-000",
+            "BraTS-GLI-00552-001",
+            "BraTS-GLI-00556-000",
+        ),
+        "distinct_subjects": False,
+    },
 }
 EXPECTED_CASES = BATCH_PROFILES[DEFAULT_BATCH_ID]["cases"]
 
