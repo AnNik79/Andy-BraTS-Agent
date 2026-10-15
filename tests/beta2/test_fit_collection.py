@@ -342,6 +342,59 @@ def test_extended_session_profiles_are_next_twenty_five_fit_cases():
     assert selected_subjects.isdisjoint(manifest["subject_partitions"]["evaluation"])
 
 
+def test_second_extended_session_profiles_are_next_twenty_five_fit_cases():
+    manifest = json.loads(
+        (ROOT / "configs" / "beta2" / "subject_partitions.json").read_text()
+    )
+    case_to_subject = {
+        case_id: case_id.rsplit("-", 1)[0]
+        for case_id in manifest["allowed_case_ids"]
+    }
+    prior_profiles = tuple(
+        [collection.DEFAULT_BATCH_ID, "fit_collection_batch_20261013_02"]
+        + [
+            f"fit_collection_batch_20261013_{index:02d}"
+            for index in (3, 4)
+        ]
+        + [f"fit_collection_batch_20261014_{index:02d}" for index in range(1, 9)]
+    )
+    extended_profiles = tuple(
+        f"fit_collection_batch_20261014_{index:02d}" for index in range(9, 14)
+    )
+    processed = {
+        "BraTS-GLI-00006-000",
+        "BraTS-GLI-00019-000",
+        "BraTS-GLI-00025-000",
+        "BraTS-GLI-00031-000",
+        *(
+            case_id
+            for profile_id in prior_profiles
+            for case_id in collection.BATCH_PROFILES[profile_id]["cases"]
+        ),
+    }
+    selected = collection.select_fit_cases(
+        manifest,
+        case_to_subject,
+        processed,
+        count=25,
+        distinct_subjects=False,
+    )
+    expected = tuple(
+        case_id
+        for profile_id in extended_profiles
+        for case_id in collection.BATCH_PROFILES[profile_id]["cases"]
+    )
+    assert selected == expected
+    assert len(selected) == len(set(selected)) == 25
+    assert all(case_id in manifest["partitions"]["fit"] for case_id in selected)
+    selected_subjects = {case_to_subject[case_id] for case_id in selected}
+    assert len(selected_subjects) == 25
+    assert selected_subjects.isdisjoint(
+        manifest["subject_partitions"]["calibration"]
+    )
+    assert selected_subjects.isdisjoint(manifest["subject_partitions"]["evaluation"])
+
+
 def test_collected_case_discovery_requires_complete_validation_provenance(tmp_path):
     valid = {
         "complete": True,

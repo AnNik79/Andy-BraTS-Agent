@@ -176,6 +176,56 @@ BATCH_PROFILES = {
         ),
         "distinct_subjects": False,
     },
+    "fit_collection_batch_20261014_09": {
+        "cases": (
+            "BraTS-GLI-01129-000",
+            "BraTS-GLI-01166-000",
+            "BraTS-GLI-01176-000",
+            "BraTS-GLI-01178-000",
+            "BraTS-GLI-01185-000",
+        ),
+        "distinct_subjects": False,
+    },
+    "fit_collection_batch_20261014_10": {
+        "cases": (
+            "BraTS-GLI-01204-000",
+            "BraTS-GLI-01213-000",
+            "BraTS-GLI-01216-000",
+            "BraTS-GLI-01232-000",
+            "BraTS-GLI-01254-000",
+        ),
+        "distinct_subjects": False,
+    },
+    "fit_collection_batch_20261014_11": {
+        "cases": (
+            "BraTS-GLI-01260-000",
+            "BraTS-GLI-01265-000",
+            "BraTS-GLI-01268-000",
+            "BraTS-GLI-01272-000",
+            "BraTS-GLI-01278-000",
+        ),
+        "distinct_subjects": False,
+    },
+    "fit_collection_batch_20261014_12": {
+        "cases": (
+            "BraTS-GLI-01283-000",
+            "BraTS-GLI-01288-000",
+            "BraTS-GLI-01293-000",
+            "BraTS-GLI-01308-000",
+            "BraTS-GLI-01310-000",
+        ),
+        "distinct_subjects": False,
+    },
+    "fit_collection_batch_20261014_13": {
+        "cases": (
+            "BraTS-GLI-01321-000",
+            "BraTS-GLI-01346-000",
+            "BraTS-GLI-01381-000",
+            "BraTS-GLI-01412-000",
+            "BraTS-GLI-01421-000",
+        ),
+        "distinct_subjects": False,
+    },
 }
 EXPECTED_CASES = BATCH_PROFILES[DEFAULT_BATCH_ID]["cases"]
 
