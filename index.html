@@ -27,7 +27,8 @@
   .frame img, .grid img { width:100%; height:auto; image-rendering:pixelated; display:block; }
   .overlay { position:absolute; inset:0; pointer-events:none; }
   .grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; }
-  figure { margin:0; }
+  figure { margin:0; padding:4px; }
+  figure.selected { outline:3px solid var(--accent); }
   figcaption { font-size:12px; margin-top:4px; color:var(--ink); }
   table { width:100%; border-collapse:collapse; background:white; }
   th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
@@ -90,31 +91,27 @@
 </main>
 <script>
 const state = { meta:null, modality:"t2f", overlay:"final", opacity:0.58, slice:0, mode:"single" };
-const compareIds = ["mri","cnn","transformer","boundary","highres","final","ground_truth","highres_full"];
+const compareIds = ["mri","cnn","transformer","boundary","highres","highres_full","final","vote","ground_truth","disagreement"];
 function slicePath(kind, id, index) {
   const folder = kind === "mri" ? `slices/mri/${id}` : `slices/seg/${id}`;
   return `${folder}/${String(index).padStart(3,"0")}.png?v=${state.meta.asset_version || 3}`;
 }
 function describeOverlay() {
   const status = document.getElementById("overlay-status");
-  if (state.overlay === "none") {
-    status.textContent = "MRI only. No segmentation is drawn.";
-    return;
+  let detail = "MRI only. No segmentation is drawn.";
+  if (state.overlay !== "none") {
+    const label = state.meta.overlays.find(item => item.id === state.overlay).label;
+    if (state.overlay === "disagreement") detail = `${label}. Yellow shows where the experts disagree. It is not a tumor label.`;
+    else if (state.overlay === "ground_truth") detail = "Ground truth. This is the reference, so no cyan difference marks are drawn.";
+    else {
+      const counts = state.meta.slice_differences && state.meta.slice_differences[state.overlay];
+      const count = counts ? counts[state.slice] : null;
+      detail = count == null ? label : `${label}. Cyan marks ${count.toLocaleString()} pixels on this slice that differ from ground truth.`;
+    }
   }
-  const label = state.meta.overlays.find(item => item.id === state.overlay).label;
-  if (state.overlay === "disagreement") {
-    status.textContent = `${label}. Yellow shows where the experts disagree. It is not a tumor label.`;
-    return;
-  }
-  if (state.overlay === "ground_truth") {
-    status.textContent = "Ground truth. This is the reference, so no cyan difference marks are drawn.";
-    return;
-  }
-  const counts = state.meta.slice_differences && state.meta.slice_differences[state.overlay];
-  const count = counts ? counts[state.slice] : null;
-  status.textContent = count == null
-    ? label
-    : `${label}. Cyan marks ${count.toLocaleString()} pixels on this slice that differ from ground truth.`;
+  status.textContent = state.mode === "compare"
+    ? `${detail} Expert comparison keeps every mask visible; the selected one is outlined.`
+    : detail;
 }
 function renderReadout() {
   document.getElementById("slice-readout").textContent = `Native axis 2 · slice ${state.slice} of ${state.meta.slice_count - 1}`;
@@ -139,6 +136,8 @@ function renderGrid() {
       : state.meta.overlays.find(item => item.id === id);
     const spec = match || {label: id};
     const figure = document.createElement("figure");
+    const selectedId = state.overlay === "none" ? "mri" : state.overlay;
+    if (id === selectedId) figure.className = "selected";
     const frame = document.createElement("div");
     frame.className = "frame";
     const base = document.createElement("img");
@@ -150,7 +149,7 @@ function renderGrid() {
       overlay.className = "overlay";
       overlay.alt = "";
       overlay.src = slicePath("seg", id, state.slice);
-      overlay.style.opacity = state.opacity;
+      overlay.style.opacity = id === "disagreement" ? 1 : state.opacity;
       frame.append(overlay);
     }
     const caption = document.createElement("figcaption");
@@ -159,10 +158,16 @@ function renderGrid() {
     grid.append(figure);
   }
 }
-function render() {
+function render(options = {}) {
   renderReadout();
   renderSingle();
-  if (state.mode === "compare") renderGrid();
+  if (state.mode === "compare") {
+    renderGrid();
+    if (options.focusSelected) {
+      const selected = document.querySelector("#grid figure.selected");
+      if (selected) selected.scrollIntoView({behavior:"smooth", block:"nearest"});
+    }
+  }
 }
 function selectedOverlay() {
   const chosen = document.querySelector("input[name=overlay]:checked");
@@ -197,7 +202,7 @@ async function init() {
     input.name = "overlay";
     input.value = item.id;
     input.checked = item.id === state.overlay;
-    input.addEventListener("change", () => { selectedOverlay(); render(); });
+    input.addEventListener("change", () => { selectedOverlay(); render({focusSelected:true}); });
     label.append(input, document.createTextNode(item.label));
     overlays.append(label);
   }
