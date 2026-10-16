@@ -71,6 +71,7 @@
       <strong>Segmentation overlay</strong>
       <div id="overlays"></div>
       <label>Opacity <input id="opacity" type="range" min="0" max="100" value="58"></label>
+      <p id="overlay-status"></p>
     </div>
     <div>
       <strong>Label colors</strong>
@@ -91,7 +92,26 @@
 const state = { meta:null, modality:"t2f", overlay:"final", opacity:0.58, slice:0, mode:"single" };
 const compareIds = ["mri","cnn","transformer","boundary","highres","final","ground_truth","highres_full"];
 function slicePath(kind, id, index) {
-  return kind === "mri" ? `slices/mri/${id}/${String(index).padStart(3,"0")}.png` : `slices/seg/${id}/${String(index).padStart(3,"0")}.png`;
+  const folder = kind === "mri" ? `slices/mri/${id}` : `slices/seg/${id}`;
+  return `${folder}/${String(index).padStart(3,"0")}.png?v=${state.meta.asset_version || 3}`;
+}
+function describeOverlay() {
+  const status = document.getElementById("overlay-status");
+  if (state.overlay === "none") {
+    status.textContent = "MRI only. No segmentation is drawn.";
+    return;
+  }
+  const label = state.meta.overlays.find(item => item.id === state.overlay).label;
+  if (state.overlay === "disagreement") {
+    status.textContent = `${label}. Yellow shows where the experts disagree. It is not a tumor label.`;
+    return;
+  }
+  if (state.overlay === "ground_truth") {
+    status.textContent = "Ground truth. This is the reference, so no cyan difference marks are drawn.";
+    return;
+  }
+  const count = state.meta.slice_differences[state.overlay][state.slice];
+  status.textContent = `${label}. Cyan marks ${count.toLocaleString()} pixels on this slice that differ from ground truth.`;
 }
 function renderReadout() {
   document.getElementById("slice-readout").textContent = `Native axis 2 · slice ${state.slice} of ${state.meta.slice_count - 1}`;
@@ -101,10 +121,11 @@ function renderSingle() {
   const mask = document.getElementById("mask");
   mri.src = slicePath("mri", state.modality, state.slice);
   mri.alt = `${state.modality} slice ${state.slice}`;
-  if (state.overlay === "none") { mask.hidden = true; return; }
+  if (state.overlay === "none") { mask.hidden = true; describeOverlay(); return; }
   mask.hidden = false;
   mask.src = slicePath("seg", state.overlay, state.slice);
-  mask.style.opacity = state.opacity;
+  mask.style.opacity = state.overlay === "disagreement" ? 1 : state.opacity;
+  describeOverlay();
 }
 function renderGrid() {
   const grid = document.getElementById("grid");
