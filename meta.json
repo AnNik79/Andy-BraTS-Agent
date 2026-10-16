@@ -1,0 +1,124 @@
+{
+  "patient_id": "BraTS-GLI-00006-000",
+  "slice_count": 155,
+  "default_slice": 69,
+  "display": "Native axis 2, transposed and vertically flipped to match origin-lower project figures.",
+  "modalities": [
+    {
+      "id": "t1n",
+      "label": "T1n"
+    },
+    {
+      "id": "t1c",
+      "label": "T1c"
+    },
+    {
+      "id": "t2w",
+      "label": "T2w"
+    },
+    {
+      "id": "t2f",
+      "label": "T2-FLAIR"
+    }
+  ],
+  "overlays": [
+    {
+      "id": "cnn",
+      "label": "CNN"
+    },
+    {
+      "id": "transformer",
+      "label": "Transformer"
+    },
+    {
+      "id": "boundary",
+      "label": "Boundary"
+    },
+    {
+      "id": "highres",
+      "label": "HighRes, proposal-limited"
+    },
+    {
+      "id": "final",
+      "label": "Controller"
+    },
+    {
+      "id": "vote",
+      "label": "Majority vote"
+    },
+    {
+      "id": "ground_truth",
+      "label": "Ground truth"
+    },
+    {
+      "id": "highres_full",
+      "label": "HighRes, full volume"
+    },
+    {
+      "id": "disagreement",
+      "label": "Expert disagreement"
+    }
+  ],
+  "test_metrics": {
+    "source": "Frozen Beta 1 held-out test aggregate. Not this patient's score.",
+    "cases": 130,
+    "mean_dice": {
+      "cnn": 0.86844,
+      "transformer": 0.86602,
+      "boundary": 0.86344,
+      "highres_full_volume": 0.81344,
+      "controller": 0.87344,
+      "majority_vote": 0.87312
+    }
+  },
+  "highres_note": "Separate full sliding-window HighRes pass. The published 0.81344 test Dice describes this protocol, not the proposal-limited mask.",
+  "proposal_coverage": 0.10781361907720566,
+  "highres_voxels_different": 681,
+  "provenance": {
+    "format": "beta1_professor_demo_case_v1",
+    "patient_id": "BraTS-GLI-00006-000",
+    "source_split": "validation",
+    "test_data_accessed": false,
+    "precomputed": true,
+    "research_only": true,
+    "expert_hashes": {
+      "cnn": "e8fbde5084353dc5aa499626d208fad7c7c4595e23376daa7d98a4890259697c",
+      "transformer": "dd77255376fb0831e7b91795dff3dbf1bba647b3e305df9ef5dfa21d6d55b64b",
+      "boundary": "dd360d8d6430acd4eff116b181ed3b83b2144fffd16c0bf8c0baaa913f00b79c",
+      "highres": "15bd9b270ff3ca160e7a4f07a93809e1e5ad9c7e25b352966df5940d639b83c0"
+    },
+    "controller_hash": "86b604082a934a1d4f4a68467a88d16d268ae7653c552dcfc6c3087ba1d79fe2",
+    "checkpoint_hashes_unchanged": true,
+    "inference": {
+      "overlap": 0.5,
+      "mc_samples": 1,
+      "uncertainty_threshold": 0.55,
+      "highres_max_patches": 128
+    },
+    "highres_proposal_limited": {
+      "file": "highres_seg.nii.gz",
+      "coverage": 0.10781361907720566,
+      "meaning": "Mask actually available to the frozen controller. Uncovered voxels are background placeholders."
+    },
+    "highres_full_volume": {
+      "file": "highres_full_seg.nii.gz",
+      "voxels_different_from_proposal_limited": 681,
+      "meaning": "Separate full sliding-window HighRes pass. The published 0.81344 test Dice describes this protocol, not the proposal-limited mask."
+    },
+    "fusion_seconds": 757.5371207910066,
+    "full_highres_seconds": 287.9322944589949,
+    "total_seconds": 1045.7566857910133,
+    "shape": [
+      240,
+      240,
+      155
+    ],
+    "spacing_mm": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "research_only": true,
+  "precomputed": true
+}
