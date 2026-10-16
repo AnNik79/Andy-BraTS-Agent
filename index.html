@@ -48,15 +48,6 @@
   </div>
 </header>
 <main>
-  <section class="stage" id="single-stage">
-    <div class="frame">
-      <img id="mri" alt="Selected MRI slice">
-      <img class="overlay" id="mask" alt="">
-    </div>
-  </section>
-  <section class="stage" id="compare-stage" hidden>
-    <div class="grid" id="grid"></div>
-  </section>
   <section class="controls">
     <div>
       <strong>MRI modality</strong>
@@ -79,6 +70,15 @@
       <p><span class="swatch" style="background:#e66101"></span>Non-enhancing core, label 1. Tumor core is labels 1 and 3.</p>
       <p><span class="swatch" style="background:#5eac43"></span>Edema, label 2. Whole tumor is labels 1, 2, and 3.</p>
     </div>
+  </section>
+  <section class="stage" id="single-stage">
+    <div class="frame">
+      <img id="mri" alt="Selected MRI slice">
+      <img class="overlay" id="mask" alt="">
+    </div>
+  </section>
+  <section class="stage" id="compare-stage" hidden>
+    <div class="grid" id="grid"></div>
   </section>
   <h2>Held-out test summary</h2>
   <table id="metrics"></table>
@@ -110,8 +110,11 @@ function describeOverlay() {
     status.textContent = "Ground truth. This is the reference, so no cyan difference marks are drawn.";
     return;
   }
-  const count = state.meta.slice_differences[state.overlay][state.slice];
-  status.textContent = `${label}. Cyan marks ${count.toLocaleString()} pixels on this slice that differ from ground truth.`;
+  const counts = state.meta.slice_differences && state.meta.slice_differences[state.overlay];
+  const count = counts ? counts[state.slice] : null;
+  status.textContent = count == null
+    ? label
+    : `${label}. Cyan marks ${count.toLocaleString()} pixels on this slice that differ from ground truth.`;
 }
 function renderReadout() {
   document.getElementById("slice-readout").textContent = `Native axis 2 · slice ${state.slice} of ${state.meta.slice_count - 1}`;
@@ -131,7 +134,10 @@ function renderGrid() {
   const grid = document.getElementById("grid");
   grid.replaceChildren();
   for (const id of compareIds) {
-    const spec = id === "mri" ? {label: state.meta.modalities.find(item => item.id === state.modality).label} : state.meta.overlays.find(item => item.id === id);
+    const match = id === "mri"
+      ? state.meta.modalities.find(item => item.id === state.modality)
+      : state.meta.overlays.find(item => item.id === id);
+    const spec = match || {label: id};
     const figure = document.createElement("figure");
     const frame = document.createElement("div");
     frame.className = "frame";
@@ -219,6 +225,7 @@ function setMode(mode) {
   document.getElementById("single-stage").hidden = mode !== "single";
   document.getElementById("compare-stage").hidden = mode !== "compare";
   render();
+  document.getElementById(mode === "compare" ? "compare-stage" : "single-stage").scrollIntoView({behavior:"smooth", block:"start"});
 }
 init();
 </script>
