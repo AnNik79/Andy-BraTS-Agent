@@ -777,3 +777,285 @@ def case_artifact_is_complete(
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
         return False
     return artifact["metadata"].get("patient_id") == patient_id
+
+
+RICH_CASE_FORMAT = "beta2_controller_oracle_case_v1"
+FEATURE_EQUIVALENCE_ATOL = 1e-4
+
+
+def _as_numpy(value) -> np.ndarray:
+    if torch.is_tensor(value):
+        value = value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
+def _gather_volume(value, flat_index: np.ndarray) -> np.ndarray:
+    """Gather channel-first or scalar volumes at flat voxel indices."""
+
+    array = _as_numpy(value)
+    while array.ndim > 3 and array.shape[0] == 1:
+        array = array[0]
+    flat_index = np.asarray(flat_index, dtype=np.int64)
+    if array.ndim == 3:
+        gathered = array.reshape(-1)[flat_index]
+        return np.asarray(gathered)
+    if array.ndim == 4:
+        channels = array.shape[0]
+        return np.asarray(array.reshape(channels, -1)[:, flat_index].T)
+    raise ValueError(f"cannot gather a volume with shape {array.shape}")
+
+
+def extract_reused_sample(
+    patient: Mapping[str, object],
+    outputs: Mapping[str, Mapping[str, object]],
+    final_probabilities,
+    weights,
+    uncertainty_maps: Mapping[str, object],
+    cfg: Mapping[str, object],
+    *,
+    subject_id: str,
+    original: Mapping[str, np.ndarray],
+) -> dict[str, object]:
+    """Gather a rich controller record at an existing sample, without resampling."""
+
+    image = np.asarray(patient["image"], dtype=np.float32)
+    target = np.asarray(patient["label"])
+    flat_index = np.asarray(original["flat_index"], dtype=np.int64).reshape(-1)
+    if image.ndim != 4 or target.shape != image.shape[1:]:
+        raise ValueError("MRI and ground truth are not aligned")
+    if flat_index.size == 0 or np.unique(flat_index).size != flat_index.size:
+        raise ValueError("reused sample indices must be nonempty and unique")
+    if (flat_index < 0).any() or (flat_index >= int(np.prod(target.shape))).any():
+        raise ValueError("reused sample indices are outside the patient grid")
+
+    js = _scalar_volume(
+        uncertainty_maps["js_disagreement"], target.shape, "JS disagreement"
+    )
+    entropy = _scalar_volume(
+        uncertainty_maps["predictive_entropy"], target.shape, "predictive entropy"
+    )
+    boundary_probability = _scalar_volume(
+        outputs["boundary"]["extra"]["boundary_probability"],
+        target.shape,
+        "boundary probability",
+    )
+    boundary_distance = (
+        _scalar_volume(
+            outputs["boundary"]["extra"]["distance_to_boundary"],
+            target.shape,
+            "boundary distance",
+        )
+        / 16.0
+    )
+    feature_volumes = (
+        js,
+        entropy,
+        boundary_probability,
+        boundary_distance,
+        *(image[index] for index in range(image.shape[0])),
+    )
+    recomputed_x = np.stack(
+        [volume.reshape(-1)[flat_index] for volume in feature_volumes], axis=1
+    ).astype(np.float32)
+
+    target_class = target.reshape(-1)[flat_index].astype(np.uint8)
+    controller_probabilities = _gather_volume(final_probabilities, flat_index).astype(
+        np.float32
+    )
+    controller_class = controller_probabilities.argmax(1).astype(np.uint8)
+    controller_error = construct_error_target(controller_class, target_class).astype(
+        np.uint8
+    )
+    gate_weights = _gather_volume(weights, flat_index).astype(np.float32)
+    if gate_weights.shape[1] != len(SEGMENTATION_EXPERTS):
+        raise ValueError("controller weights do not match the four frozen experts")
+
+    expert_probabilities, expert_entropy = [], []
+    expert_hard, expert_available, expert_correct = [], [], []
+    for name in SEGMENTATION_EXPERTS:
+        probabilities = _gather_volume(
+            outputs[name]["probabilities"], flat_index
+        ).astype(np.float32)
+        entropy = _gather_volume(outputs[name]["uncertainty"], flat_index).astype(
+            np.float32
+        )
+        available = (
+            _gather_volume(outputs[name]["extra"]["availability"], flat_index) > 0
+        )
+        hard = probabilities.argmax(1).astype(np.uint8)
+        correct = (hard == target_class) & available
+        expert_probabilities.append(probabilities)
+        expert_entropy.append(entropy)
+        expert_hard.append(hard)
+        expert_available.append(available)
+        expert_correct.append(correct)
+    expert_probabilities = np.stack(expert_probabilities, axis=1)
+    expert_entropy = np.stack(expert_entropy, axis=1).astype(np.float32)
+    expert_hard = np.stack(expert_hard, axis=1).astype(np.uint8)
+    expert_available = np.stack(expert_available, axis=1).astype(np.uint8)
+    expert_correct = np.stack(expert_correct, axis=1).astype(np.uint8)
+    if expert_probabilities.shape[2] != len(cfg["label_mapping"]):
+        raise ValueError("expert probabilities do not match the class mapping")
+    if not np.isfinite(expert_probabilities).all() or not np.isfinite(gate_weights).all():
+        raise ValueError("rich controller sample contains non-finite values")
+    if not np.allclose(
+        expert_probabilities.sum(2), 1, atol=1e-4, rtol=0
+    ) or not np.allclose(controller_probabilities.sum(1), 1, atol=1e-4, rtol=0):
+        raise ValueError("rich probability rows are not normalized")
+    if not np.allclose(gate_weights.sum(1), 1, atol=1e-4, rtol=0):
+        raise ValueError("controller weights do not sum to one")
+    unavailable_weight = gate_weights[expert_available == 0]
+    if unavailable_weight.size and np.max(np.abs(unavailable_weight)) > 1e-4:
+        raise ValueError("an unavailable expert received controller weight")
+
+    return {
+        "arrays": {
+            "X": recomputed_x,
+            "y": controller_error,
+            "flat_index": flat_index.astype(np.int64),
+            "inclusion_probability": np.asarray(
+                original["inclusion_probability"], dtype=np.float32
+            ).reshape(-1),
+            "sample_weight": np.asarray(original["sample_weight"], dtype=np.float32).reshape(
+                -1
+            ),
+            "stratum": np.asarray(original["stratum"], dtype=np.uint8).reshape(-1),
+            "target_class": target_class,
+            "expert_probabilities": expert_probabilities,
+            "expert_entropy": expert_entropy,
+            "expert_hard_class": expert_hard,
+            "expert_available": expert_available,
+            "expert_correct": expert_correct,
+            "controller_weights": gate_weights,
+            "controller_probabilities": controller_probabilities,
+            "controller_class": controller_class,
+            "controller_correct": (controller_class == target_class).astype(np.uint8),
+        },
+        "metadata": {
+            "format": RICH_CASE_FORMAT,
+            "complete": True,
+            "patient_id": str(patient["patient_id"]),
+            "subject_id": str(subject_id),
+            "source_split": "validation",
+            "exploratory": True,
+            "feature_schema": FEATURE_SCHEMA_VERSION,
+            "feature_names": list(fresh_feature_names(cfg)),
+            "expert_order": list(SEGMENTATION_EXPERTS),
+            "class_order": sorted(int(value) for value in cfg["label_mapping"].values()),
+            "spatial_shape": list(target.shape),
+            "sample_count": int(flat_index.size),
+            "highres_setting": "proposal_limited_fusion",
+            "highres_full_volume_used": False,
+            "sample_reused": True,
+            "ground_truth_used_for_inference": False,
+        },
+    }
+
+
+def fresh_feature_names(cfg: Mapping[str, object]) -> tuple[str, ...]:
+    return (
+        "js_disagreement",
+        "predictive_entropy",
+        "boundary_probability",
+        "boundary_distance",
+        *(f"mri_{name}" for name in cfg["modalities"]),
+    )
+
+
+def compare_reused_sample(
+    original: Mapping[str, np.ndarray],
+    rich: Mapping[str, np.ndarray],
+    feature_names: list[str],
+    *,
+    feature_atol: float = FEATURE_EQUIVALENCE_ATOL,
+) -> dict[str, object]:
+    """Compare a rich rerun with the archived Stage B sample."""
+
+    for name in (
+        "flat_index",
+        "y",
+        "inclusion_probability",
+        "sample_weight",
+        "stratum",
+    ):
+        left = np.asarray(original[name]).reshape(-1)
+        right = np.asarray(rich[name]).reshape(-1)
+        if left.shape != right.shape or not np.array_equal(left, right):
+            raise ValueError(f"reused sample field {name} changed")
+    left_x = np.asarray(original["X"], dtype=np.float64)
+    right_x = np.asarray(rich["X"], dtype=np.float64)
+    if left_x.shape != right_x.shape or list(feature_names) != list(
+        fresh_feature_names_from_width(left_x.shape[1], feature_names)
+    ):
+        raise ValueError("reused feature matrix shape changed")
+    difference = np.abs(left_x - right_x)
+    per_feature = {
+        name: {
+            "max_abs": float(difference[:, index].max()),
+            "mean_abs": float(difference[:, index].mean()),
+        }
+        for index, name in enumerate(feature_names)
+    }
+    maximum = float(difference.max())
+    if maximum > feature_atol:
+        raise ValueError(
+            f"reused features differ by {maximum:.3g}, above atol {feature_atol:.3g}"
+        )
+    return {
+        "feature_atol": feature_atol,
+        "max_abs": maximum,
+        "mean_abs": float(difference.mean()),
+        "per_feature": per_feature,
+        "integer_fields_equal": True,
+    }
+
+
+def save_rich_artifact(path, artifact: Mapping[str, object], *, provenance: Mapping[str, object]) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    metadata = {
+        **dict(artifact["metadata"]),
+        "provenance": dict(provenance),
+        "provenance_hash": fingerprint(provenance),
+    }
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.stem}.", suffix=".partial.npz", dir=path.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        np.savez_compressed(
+            temporary_name,
+            **artifact["arrays"],
+            metadata_json=np.asarray(json.dumps(metadata, allow_nan=False, sort_keys=True)),
+        )
+        os.replace(temporary_name, path)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def load_rich_artifact(path) -> dict[str, object]:
+    with np.load(path, allow_pickle=False) as archive:
+        metadata = json.loads(str(archive["metadata_json"].item()))
+        if metadata.get("format") != RICH_CASE_FORMAT or not metadata.get("complete"):
+            raise ValueError("unknown or incomplete controller-oracle artifact")
+        if metadata.get("provenance_hash") != fingerprint(metadata["provenance"]):
+            raise ValueError("controller-oracle provenance fingerprint is invalid")
+        arrays = {
+            name: np.asarray(archive[name])
+            for name in archive.files
+            if name != "metadata_json"
+        }
+    arrays["feature_names"] = metadata["feature_names"]
+    return {"arrays": arrays, "metadata": metadata}
+
+
+def fresh_feature_names_from_width(width: int, feature_names) -> list[str]:
+    names = list(feature_names)
+    if len(names) != width:
+        raise ValueError("feature name count does not match the feature matrix")
+    return names

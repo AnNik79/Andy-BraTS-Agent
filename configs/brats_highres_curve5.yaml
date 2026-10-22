@@ -1,5 +1,5 @@
-# Fresh 5-epoch High-Resolution learning-curve run. Validation only after epoch 5.
-# Canonical splits, frozen HighResolutionExpert, MPS float32. Do not initialize from other experts.
+# HighRes best.pt is the validated epoch-20 checkpoint (mean Dice 0.814).
+# Epoch 30 was validated and was worse (mean Dice 0.781). Do not train past 30 unless asked.
 dataset_root: ../data/BraTS-GLI/train
 dataset_archive: ../data/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData.zip
 output_dir: ../outputs/brats2023_gli_highres_curve5
@@ -24,7 +24,7 @@ crop_size: [64, 64, 64]
 highres_patch_size: [32, 32, 32]
 patches_per_patient: 4
 learning_rate: 0.0003
-epochs: 5
+epochs: 30
 controller_epochs: 20
 validation_every_epochs: 5
 validate_first_epoch: false

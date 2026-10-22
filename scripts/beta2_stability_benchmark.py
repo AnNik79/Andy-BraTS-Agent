@@ -234,7 +234,9 @@ class CaseResourceMonitor:
         if swap is not None:
             self._max_swap = swap if self._max_swap is None else max(self._max_swap, swap)
         if self._min_disk is not None and self._min_disk < MINIMUM_FREE_BYTES:
-            self.critical_reason = "internal free space fell below 15 GiB"
+            self.critical_reason = (
+                f"internal free space fell below {MINIMUM_FREE_BYTES / 1024**3:.0f} GiB"
+            )
         elif self._critical_pressure_samples >= 2:
             self.critical_reason = (
                 f"memory free percentage remained <= {MINIMUM_PRESSURE_PERCENT}%"
