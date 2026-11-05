@@ -84,7 +84,9 @@ def assert_child_can_start() -> None:
     if snapshot["disk_free_bytes"] < START_FREE_BYTES:
         raise BenchmarkStop(f"disk free is {snapshot['disk_free_bytes'] / 1024**3:.2f} GiB")
     if snapshot["available_bytes"] < MIN_AVAILABLE_BYTES:
-        raise BenchmarkStop(f"available RAM is {snapshot['available_bytes'] / 1024**3:.2f} GiB, below the 2 GiB reserve")
+        raise BenchmarkStop(
+            f"available RAM is {snapshot['available_bytes'] / 1024**3:.2f} GiB, below the 3.5 GiB requirement"
+        )
     if snapshot["memory_free_percent"] is not None and snapshot["memory_free_percent"] < MIN_FREE_PERCENT:
         raise BenchmarkStop(f"system memory free is {snapshot['memory_free_percent']}%")
 
